@@ -55,6 +55,7 @@ with open('PDB_file_properties.csv', 'w') as f:
             'Num Glu and Asp' + ','
             '% Glu and Asp' + ','
             'Electron density server response' + ','
+            'Wilson plot B-factor (A^2)' + ','
             'Non-canonical aas count' + ','
             'PDBs no reprocessing (all conformers)' + ','
             'Automatically reprocessed PDBs (all conformers)' + ','
@@ -74,6 +75,7 @@ with open('PDBe_search_XFEL.csv', 'w') as f:
             'Num Glu and Asp' + ','
             '% Glu and Asp' + ','
             'Electron density server response' + ','
+            'Wilson plot B-factor (A^2)' + ','
             'Non-canonical aas count' + ','
             'PDBs no reprocessing (all conformers)' + ','
             'Automatically reprocessed PDBs (all conformers)' + ','
@@ -120,6 +122,7 @@ for middle_chars in os.listdir(pdb_folder):
             chain_id = ''
             xray = True
             electron_density = True
+            wilson_b = 0.0
 
             ss_bonds = []
             all_new_pdb_lines = []
@@ -140,6 +143,14 @@ for middle_chars in os.listdir(pdb_folder):
                                            'uusfs?pdbCode={}'.format(pdb_code.lower())).text
             if 'sorry' in server_response:
                 electron_density = False
+            else:
+                server_response_lines = server_response.text.split('\n')
+                for index, line in enumerate(server_response_lines):
+                    if 'Wilson plot B-factor' in line:
+                        try:
+                            wilson_b = float(server_response_lines[index+1].split()[0].split('>')[-1])
+                        except ValueError:
+                            pass
 
             for index, line in enumerate(pdb_lines):
                 line = line.strip('\n')
@@ -420,6 +431,7 @@ for middle_chars in os.listdir(pdb_folder):
                             '{}'.format(glu_asp_count) + ','
                             '{}'.format(glu_asp_percent) + ','
                             '{}'.format(electron_density) + ','
+                            '{}'.format(wilson_b) + ','
                             '{}'.format(non_canonical_aa_count) + ','
                             '{}'.format(all_raw_pdbs) + ','
                             '{}'.format(all_reprocessed_pdbs) + ','
@@ -440,6 +452,7 @@ for middle_chars in os.listdir(pdb_folder):
                                 '{}'.format(glu_asp_count) + ','
                                 '{}'.format(glu_asp_percent) + ','
                                 '{}'.format(electron_density) + ','
+                                '{}'.format(wilson_b) + ','
                                 '{}'.format(non_canonical_aa_count) + ','
                                 '{}'.format(all_raw_pdbs) + ','
                                 '{}'.format(all_reprocessed_pdbs) + ','
