@@ -144,11 +144,11 @@ for middle_chars in os.listdir(pdb_folder):
             if 'sorry' in server_response:
                 electron_density = False
             else:
-                server_response_lines = server_response.text.split('\n')
+                server_response_lines = server_response.split('\n')
                 for index, line in enumerate(server_response_lines):
                     if 'Wilson plot B-factor' in line:
                         try:
-                            wilson_b = float(server_response_lines[index+1].split()[0].split('>')[-1])
+                            wilson_b = float(server_response_lines[index+1].split('>')[1].split()[0])
                         except ValueError:
                             pass
 
@@ -461,7 +461,6 @@ for middle_chars in os.listdir(pdb_folder):
                                 '{}'.format(asp_glu_reprocessed_pdbs) + ','
                                 '{}'.format(asp_glu_unprocessable_pdbs) + '\n')
 
-
 bnet_df = pd.read_csv('/Volumes/Seagate_Backup_Plus_Drive_1TB/Logfiles/Bnet_protein.csv')
 stats_df = pd.read_csv('PDB_file_properties.csv')
 
@@ -477,4 +476,4 @@ for bnet_index, pdb in enumerate(bnet_df['PDB'].tolist()):
 
 bnet_values_df = pd.DataFrame({'Bnet': bnet_values})
 df = pd.concat([stats_df, bnet_values_df], axis=1)
-df.to_csv('Bnet_protein.csv')
+df.to_csv('PDB_file_properties_plus_Bnet.csv')
