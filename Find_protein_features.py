@@ -28,15 +28,15 @@ res_dict = {'ALA': 89.1,
             'TYR': 181.2,
             'VAL': 117.1}
 
-with open('Protein_and_NA_PDB_IDs/Protein_PDB_IDs.txt', 'r') as f:
+with open('../Protein_and_NA_PDB_IDs/Protein_PDB_IDs.txt', 'r') as f:
     protein_pdbs = f.readlines()
     protein_pdbs = [pdb.strip('\n') for pdb in protein_pdbs if len(pdb) == 5]
 
-with open('Protein_and_NA_PDB_IDs/NA_PDB_IDs.txt', 'r') as f:
+with open('../Protein_and_NA_PDB_IDs/NA_PDB_IDs.txt', 'r') as f:
     na_pdbs = f.readlines()
     na_pdbs = [pdb.strip('\n') for pdb in na_pdbs if len(pdb) == 5]
 
-with open('Protein_and_NA_PDB_IDs/XFEL_PDB_IDs.txt', 'r') as f:
+with open('../Protein_and_NA_PDB_IDs/XFEL_PDB_IDs.txt', 'r') as f:
     xfel_pdbs = f.readlines()
     xfel_pdbs = [pdb.strip('\n') for pdb in xfel_pdbs if len(pdb) == 5]
 
@@ -44,7 +44,7 @@ if bool(set(protein_pdbs) & set(na_pdbs)):
     sys.exit('Overlap between protein only and nucleic acid containing PDB'
              'accession code lists')
 
-with open('PDB_file_properties.csv', 'w') as f:
+with open('../PDB_file_properties.csv', 'w') as f:
     f.write('PDB code' + ','
             'Resolution (A)' + ','
             'Rwork' + ','
@@ -64,7 +64,7 @@ with open('PDB_file_properties.csv', 'w') as f:
             'Automatically reprocessed PDBs (asp and glu conformers)' + ','
             'PDBs for manual reprocessing (asp and glu conformers)' + '\n')
 
-with open('PDBe_search_XFEL.csv', 'w') as f:
+with open('../PDBe_search_XFEL.csv', 'w') as f:
     f.write('PDB code' + ','
             'Resolution (A)' + ','
             'Rwork' + ','
@@ -344,7 +344,8 @@ for middle_chars in os.listdir(pdb_folder):
                 elif all_reprocessed is True and all_unprocessable is False:
                     all_reprocessed_pdbs = True
                     with open(
-                        '/Volumes/Seagate_Backup_Plus_Drive_1TB/RABDAM/All_conformers/'
+                        '/Volumes/Seagate_Backup_Plus_Drive_1TB/sub_1_occ_PDB'
+                        '_files_automatically_reprocessed/All_conformers/'
                         '{}_automatically_reprocessed.pdb'.format(pdb_code), 'w'
                     ) as f:
                         for line in all_new_pdb_lines:
@@ -398,7 +399,8 @@ for middle_chars in os.listdir(pdb_folder):
                 elif asp_glu_reprocessed is True and asp_glu_unprocessable is False:
                     asp_glu_reprocessed_pdbs = True
                     with open(
-                        '/Volumes/Seagate_Backup_Plus_Drive_1TB/RABDAM/Asp_Glu_conformers/'
+                        '/Volumes/Seagate_Backup_Plus_Drive_1TB/sub_1_occ_PDB'
+                        '_files_automatically_reprocessed/Asp_Glu_conformers/'
                         '{}_automatically_reprocessed.pdb'.format(pdb_code), 'w'
                     ) as f:
                         for line in asp_glu_new_pdb_lines:
@@ -420,7 +422,7 @@ for middle_chars in os.listdir(pdb_folder):
             ):
                 print('Unprocessed: {}'.format(pdb_code))
             else:
-                with open('PDB_file_properties.csv', 'a') as f:
+                with open('../PDB_file_properties.csv', 'a') as f:
                     f.write('{}'.format(pdb_code) + ','
                             '{}'.format(resolution) + ','
                             '{}'.format(rwork) + ','
@@ -441,7 +443,7 @@ for middle_chars in os.listdir(pdb_folder):
                             '{}'.format(asp_glu_unprocessable_pdbs) + '\n')
 
                 if pdb_code in xfel_pdbs:
-                    with open('PDBe_search_XFEL.csv', 'a') as f:
+                    with open('../PDBe_search_XFEL.csv', 'a') as f:
                         f.write('{}'.format(pdb_code) + ','
                                 '{}'.format(resolution) + ','
                                 '{}'.format(rwork) + ','
@@ -462,18 +464,30 @@ for middle_chars in os.listdir(pdb_folder):
                                 '{}'.format(asp_glu_unprocessable_pdbs) + '\n')
 
 bnet_df = pd.read_csv('/Volumes/Seagate_Backup_Plus_Drive_1TB/Logfiles/Bnet_protein.csv')
-stats_df = pd.read_csv('PDB_file_properties.csv')
+all_stats_df = pd.read_csv('../PDB_file_properties.csv')
+xfel_stats_df = pd.read_csv('../PDBe_search_XFEL.csv')
+all_bnet_values = ['']*all_stats_df.shape[0]
+xfel_bnet_values = ['']*xfel_stats_df.shape[0]
 
-bnet_values = ['']*stats_df.shape[0]
 for bnet_index, pdb in enumerate(bnet_df['PDB'].tolist()):
     bnet = bnet_df['Bnet'][bnet_index]
 
     try:
-        pdb_index = stats_df['PDB code'].tolist().index(pdb)
-        bnet_values[pdb_index] = bnet
+        pdb_index = all_stats_df['PDB code'].tolist().index(pdb)
+        all_bnet_values[pdb_index] = bnet
     except ValueError:
         pass
 
-bnet_values_df = pd.DataFrame({'Bnet': bnet_values})
-df = pd.concat([stats_df, bnet_values_df], axis=1)
-df.to_csv('PDB_file_properties_plus_Bnet.csv')
+    try:
+        pdb_index = xfel_stats_df['PDB code'].tolist().index(pdb)
+        xfel_bnet_values[pdb_index] = bnet
+    except ValueError:
+        pass
+
+all_bnet_values_df = pd.DataFrame({'Bnet': all_bnet_values})
+all_df = pd.concat([all_stats_df, all_bnet_values_df], axis=1)
+all_df.to_csv('../PDB_file_properties_plus_Bnet.csv')
+
+xfel_bnet_values_df = pd.DataFrame({'Bnet': xfel_bnet_values})
+xfel_df = pd.concat([xfel_stats_df, xfel_bnet_values_df], axis=1)
+xfel_df.to_csv('../PDBe_search_XFEL_plus_Bnet.csv')
