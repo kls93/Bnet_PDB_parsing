@@ -34,7 +34,7 @@ for middle_chars in os.listdir(pdb_folder):
             structure_count += 1
             print('{}: {}'.format(pdb_code, structure_count))
 
-            per_atom_b_factors = False
+            per_atom_b_factors = True
 
             with open('{}{}/{}'.format(pdb_folder, middle_chars, pdb_file_path), 'r') as f:
                 pdb_file_lines = f.readlines()
@@ -67,7 +67,7 @@ for middle_chars in os.listdir(pdb_folder):
                         (    (len(side_chain_bfactors) == side_chain_numbers[res_name])
                          and (len(set(side_chain_bfactors)) == 1))
                     ):
-                        per_atom_b_factors = True
+                        per_atom_b_factors = False
 
             per_atom_refined_structures[pdb_code] = per_atom_b_factors
 
