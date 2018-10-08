@@ -1,13 +1,13 @@
 
 import os
 import pandas as pd
+from collections import OrderedDict
 
 pdb_folder = '/Volumes/Seagate_Backup_Plus_Drive/pdb/asymmetric_unit/'
 structure_count = 0
-per_atom_refined_structures = {}
+per_atom_refined_structures = OrderedDict()
 
-side_chain_atom_numbers = {'ALA': 1,
-                           'ARG': 7,
+side_chain_atom_numbers = {'ARG': 7,
                            'ASN': 4,
                            'ASP': 4,
                            'CYS': 2,
@@ -39,7 +39,7 @@ for middle_chars in os.listdir(pdb_folder):
             with open('{}{}/{}'.format(pdb_folder, middle_chars, pdb_file_path), 'r') as f:
                 pdb_file_lines = f.readlines()
 
-            res_bfactors = {}
+            res_bfactors = OrderedDict()
             for line in pdb_file_lines:
                 if line[0:6].strip() in ['ATOM']:
                     res_id = line[21:27].replace(' ', '') + '_' + line[16:20]
@@ -64,7 +64,7 @@ for middle_chars in os.listdir(pdb_folder):
                         (    (len(main_chain_bfactors) == 4)
                          and (len(set(main_chain_bfactors)) == 1))
                         or
-                        (    (len(side_chain_bfactors) == side_chain_numbers[res_name])
+                        (    (len(side_chain_bfactors) == side_chain_atom_numbers[res_name])
                          and (len(set(side_chain_bfactors)) == 1))
                     ):
                         per_atom_b_factors = False
