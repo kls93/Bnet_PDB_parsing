@@ -4,7 +4,7 @@ import pandas as pd
 from collections import OrderedDict
 
 pdb_codes_file = input('Specify csv file to which to add features: ')
-bnet_df = pd.read_csv('PDB_file_properties.csv')
+bnet_df = pd.read_csv('../PDB_file_properties.csv')
 df = pd.read_csv(pdb_codes_file)
 
 bnet_pdb_codes = bnet_df['PDB code'].tolist()
@@ -27,8 +27,7 @@ all_manual_reprocess_values = ['']*df.shape[0]
 glu_asp_no_reprocess_values = ['']*df.shape[0]
 glu_asp_automatic_reprocess_values = ['']*df.shape[0]
 glu_asp_manual_reprocess_values = ['']*df.shape[0]
-
-# bnet_values = ['']*df.shape[0]
+bnet_values = ['']*df.shape[0]
 
 for df_index, pdb in enumerate(df_pdb_codes):
     if not pdb in ['', np.nan]:
@@ -53,8 +52,7 @@ for df_index, pdb in enumerate(df_pdb_codes):
             glu_asp_no_reprocess = bnet_df['PDBs no reprocessing (asp and glu conformers)'][bnet_index]
             glu_asp_automatic_reprocess = bnet_df['Automatically reprocessed PDBs (asp and glu conformers)'][bnet_index]
             glu_asp_manual_reprocess = bnet_df['PDBs for manual reprocessing (asp and glu conformers)'][bnet_index]
-
-            # bnet = bnet_df['Bnet'][bnet_index]
+            bnet = bnet_df['Bnet'][bnet_index]
 
             resolution_values[df_index] = resolution
             rwork_values[df_index] = rwork
@@ -73,8 +71,7 @@ for df_index, pdb in enumerate(df_pdb_codes):
             glu_asp_no_reprocess_values[df_index] = glu_asp_no_reprocess
             glu_asp_automatic_reprocess_values[df_index] = glu_asp_automatic_reprocess
             glu_asp_manual_reprocess_values[df_index] = glu_asp_manual_reprocess
-
-            # bnet_values[df_index] = bnet
+            bnet_values[df_index] = bnet
 
         except ValueError:
             pass
@@ -95,6 +92,7 @@ features_df = pd.DataFrame(OrderedDict({'Resolution (A)': resolution_values,
                                         'PDBs for manual reprocessing (all conformers)': all_manual_reprocess_values,
                                         'PDBs no reprocessing (asp and glu conformers)': glu_asp_no_reprocess_values,
                                         'Automatically reprocessed PDBs (asp and glu conformers)': glu_asp_automatic_reprocess_values,
-                                        'PDBs for manual reprocessing (asp and glu conformers)': glu_asp_manual_reprocess_values}))
+                                        'PDBs for manual reprocessing (asp and glu conformers)': glu_asp_manual_reprocess_values,
+                                        'Bnet': bnet_values}))
 df = pd.concat([df, features_df], axis=1)
-df.to_csv('New_csv.csv')
+df.to_csv('{}_plus_features.csv'.format(pdb_codes_file.rstrip('.csv')))
