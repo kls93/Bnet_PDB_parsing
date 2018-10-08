@@ -17,7 +17,7 @@ for middle_chars in os.listdir(pdb_folder):
             per_atom_b_factors = False
 
             with open('{}{}/{}'.format(pdb_folder, middle_chars, pdb_file_path), 'r') as f:
-                pdb_file_lines = f.readlines():
+                pdb_file_lines = f.readlines()
 
             res_bfactors = {}
             for line in pdb_file_lines:
@@ -38,9 +38,9 @@ for middle_chars in os.listdir(pdb_folder):
                     else:
                         side_chain_bfactors.append(res_bfactors[res_id][atom_id])
                 if (
-                    (len(main_chain_bfactors) == 4 and len(set(main_chain_bfactors)) == 1)
+                    ((len(main_chain_bfactors) == 4) and (len(set(main_chain_bfactors)) == 1))
                     or
-                    (len(side_chain_bfactors) > 1) and len(set(side_chain_bfactors)) == 1)
+                    ((len(side_chain_bfactors) > 1) and (len(set(side_chain_bfactors)) == 1))
                 ):
                     per_atom_b_factors = True
 
