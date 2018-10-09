@@ -34,8 +34,6 @@ for middle_chars in os.listdir(pdb_folder):
             structure_count += 1
             print('{}: {}'.format(pdb_code, structure_count))
 
-            per_atom_b_factors = True
-
             with open('{}{}/{}'.format(pdb_folder, middle_chars, pdb_file_path), 'r') as f:
                 pdb_file_lines = f.readlines()
 
@@ -48,27 +46,26 @@ for middle_chars in os.listdir(pdb_folder):
                         res_bfactors[res_id] = {}
                     res_bfactors[res_id][atom_id] = float(line[60:66])
 
+            per_res_bfactor_count = 0
             for res_id in res_bfactors:
                 main_chain_bfactors = []
-                side_chain_bfactors = []
 
                 res_name = res_id.split('_')[-1][1:]
                 if res_name in side_chain_atom_numbers:
                     for atom_id in res_bfactors[res_id]:
                         if atom_id in ['N', 'CA', 'C', 'O']:
                             main_chain_bfactors.append(res_bfactors[res_id][atom_id])
-                        else:
-                            side_chain_bfactors.append(res_bfactors[res_id][atom_id])
 
                     if (
-                        (    (len(main_chain_bfactors) == 4)
-                         and (len(set(main_chain_bfactors)) == 1))
-                        or
-                        (    (len(side_chain_bfactors) == side_chain_atom_numbers[res_name])
-                         and (len(set(side_chain_bfactors)) == 1))
+                            (len(main_chain_bfactors) == 4)
+                        and (len(set(main_chain_bfactors)) == 1)
                     ):
-                        per_atom_b_factors = False
+                        per_res_bfactor_count += 1
 
+            if per_res_bfactor_count >= 3:
+                per_atom_b_factors = False
+            else:
+                per_atom_b_factors = True
             per_atom_refined_structures[pdb_code] = per_atom_b_factors
 
 df = pd.DataFrame({'PDB code': list(per_atom_refined_structures.keys()),
