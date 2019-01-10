@@ -94,7 +94,59 @@ stats_df = pd.DataFrame(sub_df_stats)
 stats_df.to_csv('Resolution_window_PDB_file_properties_filtered_stats.csv', index=False)
 
 
+# Calculates percentile value of each structure's Bnet value in its resolution
+# bin
+import pandas as pd
+import numpy as np
 
+rad_dam_df = pd.read_csv('PDB_file_properties.csv')
+
+bnet_percentile_list = [np.nan]*rad_dam_df.shape[0]
+for row in range(rad_dam_df.shape[0]):
+    pdb = rad_dam_df['PDB code'][row]
+
+    try:
+        sub_df = pd.read_csv('Resolution_filter/{}_nearest_resolution_structures.csv'.format(pdb))
+        bnet = sub_df['Bnet'][sub_df['PDB code'].tolist().index(pdb)]
+        bnet_pdb_range = np.sort(np.array(sub_df['Bnet'].tolist()))
+        bnet_pdb_percentile = (np.where(bnet_pdb_range == bnet)[0][0] + 1) / bnet_pdb_range.shape[0]
+        bnet_percentile_list[row] = bnet_pdb_percentile
+        print(pdb, bnet_pdb_percentile)
+
+    except FileNotFoundError:
+        pass
+
+bnet_percentile_df = pd.DataFrame({'Bnet percentile (local resolution bin)': bnet_percentile})
+new_df = pd.concat([rad_dam_df, bnet_percentile_df], axis=1)
+new_df.to_csv('PDB_file_properties_updated.csv', index=False)
+
+# Extracts Bnet and Bnet percentile values for Kaushik
+import pandas as pd
+import numpy as np
+
+kaushik_df = pd.read_csv('/Users/ks17361/Downloads/targetPDBID.csv')
+bnet_df = pd.read_csv('PDB_file_properties_filtered.csv')
+
+bnet_list = [np.nan]*kaushik_df.shape[0]
+bnet_percentile_list = [np.nan]*kaushik_df.shape[0]
+
+for row in range(kaushik_df.shape[0]):
+    pdb = kaushik_df['a.PDBID'][row][0:4].upper()
+
+    try:
+        index = bnet_df['PDB code'].tolist().index(pdb)
+        bnet = bnet_df['Bnet'][index]
+        bnet_percentile = bnet_df['Bnet percentile (local resolution bin)'][index]
+        bnet_list[row] = bnet
+        bnet_percentile_list[row] = bnet_percentile
+
+    except ValueError:
+        pass
+
+bnet_df = pd.DataFrame({'Bnet': bnet_list,
+                        'Bnet percentile': bnet_percentile_list})
+kaushik_df_updated = pd.concat([kaushik_df, bnet_df], axis=1)
+kaushik_df_updated.to_csv('/Users/ks17361/Downloads/targetPDBID_Bnet.csv', index=False)
 
 # Absolute and relative RSRZ scores
 df = pd.read_csv('PDB_file_properties.csv')
