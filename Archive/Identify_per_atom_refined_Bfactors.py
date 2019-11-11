@@ -1,4 +1,7 @@
 
+# Identifies structures with 20% or more residues with N, CA, C and O atoms
+# with the same B-factor values
+
 import os
 import pandas as pd
 from collections import OrderedDict
@@ -46,6 +49,7 @@ for middle_chars in os.listdir(pdb_folder):
                         res_bfactors[res_id] = {}
                     res_bfactors[res_id][atom_id] = float(line[60:66])
 
+            per_atom_b_factors = ''
             per_res_bfactor_count = 0
             for res_id in res_bfactors:
                 main_chain_bfactors = []
@@ -62,7 +66,10 @@ for middle_chars in os.listdir(pdb_folder):
                     ):
                         per_res_bfactor_count += 1
 
-            if per_res_bfactor_count >= 3:
+            thresh = len(res_bfactors)*0.2
+            if thresh < 3:
+                thresh = 3
+            if per_res_bfactor_count >= thresh:
                 per_atom_b_factors = False
             else:
                 per_atom_b_factors = True

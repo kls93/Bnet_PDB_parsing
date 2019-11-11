@@ -1,4 +1,6 @@
 
+# ARCHIVED - NO LONGER THINK AUTOMATED RE-REFINEMENT IS A GOOD IDEA!
+
 import os
 import requests
 import shutil

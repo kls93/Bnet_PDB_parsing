@@ -99,7 +99,7 @@ stats_df.to_csv('Resolution_window_PDB_file_properties_filtered_stats.csv', inde
 import pandas as pd
 import numpy as np
 
-rad_dam_df = pd.read_csv('PDB_file_properties.csv')
+rad_dam_df = pd.read_csv('PDB_file_properties_filtered.csv')
 
 bnet_percentile_list = [np.nan]*rad_dam_df.shape[0]
 for row in range(rad_dam_df.shape[0]):
@@ -116,9 +116,10 @@ for row in range(rad_dam_df.shape[0]):
     except FileNotFoundError:
         pass
 
-bnet_percentile_df = pd.DataFrame({'Bnet percentile (local resolution bin)': bnet_percentile})
+bnet_percentile_df = pd.DataFrame({'Bnet percentile (local resolution bin)': bnet_percentile_list})
 new_df = pd.concat([rad_dam_df, bnet_percentile_df], axis=1)
 new_df.to_csv('PDB_file_properties_updated.csv', index=False)
+
 
 # Extracts Bnet and Bnet percentile values for Kaushik
 import pandas as pd
@@ -147,6 +148,7 @@ bnet_df = pd.DataFrame({'Bnet': bnet_list,
                         'Bnet percentile': bnet_percentile_list})
 kaushik_df_updated = pd.concat([kaushik_df, bnet_df], axis=1)
 kaushik_df_updated.to_csv('/Users/ks17361/Downloads/targetPDBID_Bnet.csv', index=False)
+
 
 # Absolute and relative RSRZ scores
 df = pd.read_csv('PDB_file_properties.csv')
