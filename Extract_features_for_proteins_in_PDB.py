@@ -417,12 +417,50 @@ def write_pdb_properties():
 def calc_bnet_percentile(all_pdbs_df):
     """
     Calculates bnet_percentile for PDB structure XXXX by comparing its Bnet
-    value to the Bnet values of structures of a similar resolution
+    value to the Bnet values of structures (min. 1000) of a similar resolution
     """
 
-    for pdb_code in all_pdbs_df['PDB code'].tolist():
-        bnet_percentile = np.nan
+    bnet_percentile_df = [np.nan]*all_pdbs_df.shape[0]
 
-    all_pdbs_df.to_pickle('PDB_file_properties.pkl')
+    for row in range(all_pdbs_df.shape[0]):
+        pdb_code = all_pdbs_df['PDB code'][row]
+        resolution = all_pdbs_df['Resolution (A)'][row]
+        bnet = all_pdbs_df['Bnet'][row]
+        if np.isnan(bnet) or np.isinf(bnet):
+            print('WARNING: Not calculating Bnet percentile for {}'.format(pdb_code))
+            continue
 
-    return all_pdbs_df
+        print('Calculating Bnet percentile for {} {}'.format(
+            pdb_code, ((row+1) / all_pdbs_df.shape[0])
+        ))
+
+        resolution_array = all_pdbs_df['Resolution (A)'].to_numpy()
+
+        surr_struct_indices = []
+        surr_struct_resns = []
+        for num in range(1000):
+            index = (np.abs(resolution_array-resolution)).argmin()
+            nearest_resn = resolution_array[index]
+            surr_struct_indices.append(index)
+            surr_struct_resns.append(nearest_resn)
+            resolution_array[index] = np.inf
+
+        min_resolution = min(surr_struct_resns)
+        max_resolution = max(surr_struct_resns)
+        for index, num in np.ndenumerate(resolution_array):
+            if num == min_resolution or num == max_resolution:
+                surr_struct_indices.append(index[0])
+
+        surr_struct_df = all_pdbs_df.iloc[surr_struct_indices].reset_index(drop=True)
+        bnet_range = np.sort(surr_struct_df['Bnet'].to_numpy())
+        bnet_percentile = (np.where(bnet_range == bnet)+1) / bnet_range.shape[0]
+        bnet_percentile_df[row] = bnet_percentile
+
+    bnet_percentile_df = pd.concat(
+        [all_pdbs_df, pd.DataFrame('Bnet percentile': bnet_percentile_df)],
+        axis=1, ignore_index=True
+    )
+    bnet_percentile_df.to_pickle('PDB_file_properties_plus_Bnet_percentile.pkl')
+    bnet_percentile_df.to_csv('PDB_file_properties.csv', index=False)
+
+    return all_pdbs_df, bnet_percentile_df
