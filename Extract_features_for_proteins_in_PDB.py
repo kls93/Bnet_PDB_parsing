@@ -490,7 +490,7 @@ def calc_bnet_percentile(all_pdbs_df):
 
         surr_struct_indices = []
         surr_struct_resns = []
-        for num in range(5):
+        for num in range(1000):
             index = (np.abs(resolution_array-resolution)).argmin()
             nearest_resn = resolution_array[index]
             surr_struct_indices.append(index)
