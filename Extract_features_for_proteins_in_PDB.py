@@ -376,7 +376,7 @@ def write_pdb_properties():
     plus their Bnet values to a dataframe
     """
 
-    with open('Protein_and_NA_PDB_IDs/Protein_PDB_IDs_test.txt', 'r') as f:
+    with open('Protein_and_NA_PDB_IDs/Protein_PDB_IDs.txt', 'r') as f:
         protein_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
 
     with open('Protein_and_NA_PDB_IDs/NA_PDB_IDs.txt', 'r') as f:
