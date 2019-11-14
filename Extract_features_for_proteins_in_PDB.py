@@ -8,7 +8,6 @@ import copy
 import os
 import requests
 import shutil
-import sys
 import numpy as np
 import pandas as pd
 
@@ -103,12 +102,12 @@ def calc_bnet(pdb_code):
     os.remove('temp_rabdam_input.txt')
 
     try:
-        bnet_df = pd.read_pickle('/Volumes/Seagate_Backup_Plus_Drive/RABDAM_for_PDB'
-                             '/Logfiles/Bnet_Protein.pkl')
+        bnet_df = pd.read_pickle(
+            '/Volumes/Seagate_Backup_Plus_Drive/RABDAM_for_PDB/Logfiles/Bnet_Protein.pkl'
+        )
         try:
             index = bnet_df['PDB'].tolist().index(pdb_code.upper())
             bnet = bnet_df['Bnet'][index]
-            print(bnet)
         except ValueError:
             pass
     except FileNotFoundError:
@@ -175,7 +174,8 @@ def find_structurewide_properties(pdb_lines):
 
         # Finds residues in asymmetric unit
         if '_entity_poly_seq.' in subsection:
-            sub_lines = [line for line in subsection.split('\n') if not line.strip() == '']
+            sub_lines = [line for line in subsection.split('\n')
+                         if not line.strip() in ['', 'loop_']]
             prop_indices = {}
             prop_num = 0
             for line in sub_lines:
@@ -185,13 +185,14 @@ def find_structurewide_properties(pdb_lines):
                     prop_num += 1
                 elif not any(line.startswith(x) for x in ['_', 'loop_']):
                     line = line.split()
-                    i1 = prop_indices['entity_id']
-                    if not line[i1] in seqres:
-                        seqres[line[i1]] = []
-                    i2 = prop_indices['mon_id']
-                    seqres[line[i1]].append(line[i2].upper())
-
-    print(resolution, rwork, rfree, temperature)
+                    try:
+                       i1 = prop_indices['entity_id']
+                        if not line[i1] in seqres:
+                            seqres[line[i1]] = []
+                        i2 = prop_indices['mon_id']
+                        seqres[line[i1]].append(line[i2].upper())
+                    except IndexError:
+                        break
 
     return (resolution, rwork, rfree, temperature, seqres)
 
@@ -214,7 +215,7 @@ def find_aa_properties(seqres, mass_dict):
             count += 1
             sub_count += 1
 
-            if res in list(mass_dict.keys()):
+            if res.upper() in list(mass_dict.keys()):
                 size += mass_dict[res]
                 if res in ['GLU', 'ASP']:
                     glu_asp_count += 1
@@ -263,7 +264,7 @@ def find_peratom_properties(atom_lines, seqres):
         # Finds terminal O atoms
         if (
                 line['label_comp_id'] in ['ASP', 'GLU']
-            and line['label_atom_id'].strip() in ['OD1', 'OD2', 'OE1', 'OE2']
+            and line['label_atom_id'] in ['OD1', 'OD2', 'OE1', 'OE2']
         ):
             atom_id = '_'.join([line['label_entity_id'], line['label_seq_id'],
                                 line['label_comp_id'], line['label_atom_id']])
@@ -344,35 +345,40 @@ def write_pdb_properties():
         xfel_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
 
     if bool(set(protein_pdbs) & set(na_pdbs)):
-        sys.exit('Overlap between protein only and nucleic acid containing PDB'
-                 'accession code lists')
+        raise Exception(
+            'Overlap between protein only and nucleic acid containing PDB'
+            'accession code lists'
+        )
 
-    all_pdbs_df = pd.DataFrame({'PDB code': [],
-                                'Resolution (A)': [],
-                                'Rwork': [],
-                                'Rfree': [],
-                                'Temperature (K)': [],
-                                'Size (kDa)': [],
-                                'Num Glu and Asp': [],
-                                '% Glu and Asp': [],
-                                'Num terminal O atoms': [],
-                                'Non-canonical aas count': [],
-                                'Per-atom refined B-factors': [],
-                                'Electron density server response': [],
-                                'Wilson plot B-factor (A^2)': [],
-                                'RSRZ relative to all structures': [],
-                                'RSRZ relative to similar res structures': [],
-                                'Reprocessing required? (all conformers)': [],
-                                'Reprocessing required? (asp and glu conformers)': [],
-                                'Bnet': []})
-
-    if os.path.isdir('PDB_parsing_output'):
-        shutil.rmtree('PDB_parsing_output')
-    os.mkdir('PDB_parsing_output')
-    with open('PDB_parsing_output/Progress_track.txt', 'w') as f:
-        f.write('PDBs processed so far:\n')
-    with open('PDB_parsing_output/Unprocessed_PDBs.txt', 'w') as f:
-        f.write('PDBs unable to be processed:\n')
+    if not os.path.isdir('PDB_parsing_output'):
+        os.mkdir('PDB_parsing_output')
+    if not os.path.isfile('PDB_parsing_output/Progress_track.txt'):
+        with open('PDB_parsing_output/Progress_track.txt', 'w') as f:
+            f.write('PDBs processed so far:\n')
+    if not os.path.isfile('PDB_parsing_output/Unprocessed_PDBs.txt'):
+        with open('PDB_parsing_output/Unprocessed_PDBs.txt', 'w') as f:
+            f.write('PDBs unable to be processed:\n')
+    if os.path.isfile('PDB_parsing_output/PDB_file_properties.pkl'):
+        all_pdbs_df = pd.read_pickle('PDB_parsing_output/PDB_file_properties.pkl')
+    else:
+        all_pdbs_df = pd.DataFrame({'PDB code': [],
+                                    'Resolution (A)': [],
+                                    'Rwork': [],
+                                    'Rfree': [],
+                                    'Temperature (K)': [],
+                                    'Size (kDa)': [],
+                                    'Num Glu and Asp': [],
+                                    '% Glu and Asp': [],
+                                    'Num terminal O atoms': [],
+                                    'Non-canonical aas count': [],
+                                    'Per-atom refined B-factors': [],
+                                    'Electron density server response': [],
+                                    'Wilson plot B-factor (A^2)': [],
+                                    'RSRZ relative to all structures': [],
+                                    'RSRZ relative to similar res structures': [],
+                                    'Reprocessing required? (all conformers)': [],
+                                    'Reprocessing required? (asp and glu conformers)': [],
+                                    'Bnet': []})
 
     structure_count = 0
     for pdb_code in protein_pdbs:
@@ -440,7 +446,7 @@ def write_pdb_properties():
             print('WARNING: Failed to calculate Bnet for {}'.format(pdb_code))
             continue
 
-        # Summarises PDB features in csv file
+        # Summarises PDB features in dataframe
         print('Summarising info for {}'.format(pdb_code))
         indv_pdb_df = pd.DataFrame({'PDB code': [pdb_code],
                                     'Resolution (A)': [resolution],
@@ -511,7 +517,7 @@ def calc_bnet_percentile(all_pdbs_df):
     bnet_percentile_df = pd.DataFrame({'Bnet percentile': bnet_percentile_df})
     bnet_percentile_df = pd.concat(
         [all_pdbs_df, bnet_percentile_df], axis=1
-    )
+    ).reset_index(drop=True)
     bnet_percentile_df.to_pickle('PDB_parsing_output/PDB_file_properties.pkl')
     bnet_percentile_df.to_csv('PDB_parsing_output/PDB_file_properties.csv', index=False)
     all_pdbs_df.to_pickle('PDB_parsing_output/Old_PDB_file_properties_just_in_case.pkl')
