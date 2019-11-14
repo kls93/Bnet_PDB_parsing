@@ -192,11 +192,12 @@ def find_structurewide_properties(pdb_lines):
                             seqres[line[i1]] = []
                         i2 = prop_indices['mon_id']
                         seqres[line[i1]].append(line[i2].upper())
-                    except IndexError:
+                    except (KeyError, IndexError):
+                        seqres = {}
                         break
 
         # Finds disulfide bonds
-        if '\ndisulf' in subsection:
+        if '_struct_conn.' in subsection:
             sub_lines = [line for line in subsection.split('\n')
                          if not line.strip() in ['', 'loop_']]
             prop_indices = {}
@@ -218,7 +219,7 @@ def find_structurewide_properties(pdb_lines):
                                     + line[prop_indices['ptnr2_label_seq_id']] + '_'
                                     + line[prop_indices['pdbx_ptnr2_PDB_ins_code']])
                             ss_bonds[bond_num] = [res1, res2]
-                    except IndexError:
+                    except (KeyError, IndexError):
                         ss_bonds = {}
                         break
 
