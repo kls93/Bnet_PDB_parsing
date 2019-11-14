@@ -126,6 +126,7 @@ def find_structurewide_properties(pdb_lines):
     rfree = np.nan
     temperature = np.nan
     seqres = {}
+    ss_bonds = {}
 
     for subsection in pdb_lines:
         # Finds structure resolution
@@ -183,7 +184,7 @@ def find_structurewide_properties(pdb_lines):
                     prop = line.split('.')[1].strip()
                     prop_indices[prop] = prop_num
                     prop_num += 1
-                elif not any(line.startswith(x) for x in ['_', 'loop_']):
+                elif not line.startswith('_'):
                     line = line.split()
                     try:
                         i1 = prop_indices['entity_id']
@@ -194,7 +195,34 @@ def find_structurewide_properties(pdb_lines):
                     except IndexError:
                         break
 
-    return (resolution, rwork, rfree, temperature, seqres)
+        # Finds disulfide bonds
+        if '\ndisulf' in subsection:
+            sub_lines = [line for line in subsection.split('\n')
+                         if not line.strip() in ['', 'loop_']]
+            prop_indices = {}
+            prop_num = 0
+            for line in sub_lines:
+                if line.startswith('_struct_conn.'):
+                    prop = line.split('.')[1].strip()
+                    prop_indices[prop] = prop_num
+                    prop_num += 1
+                elif line.startswith('disulf'):
+                    line = line.split()
+                    try:
+                        if line[prop_indices['conn_type_id']] == 'disulf':
+                            bond_num = line[prop_indices['id']].replace('disulf', '')
+                            res1 = (  line[prop_indices['ptnr1_label_asym_id']] + '_'
+                                    + line[prop_indices['ptnr1_label_seq_id']] + '_'
+                                    + line[prop_indices['pdbx_ptnr1_PDB_ins_code']])
+                            res2 = (  line[prop_indices['ptnr2_label_asym_id']] + '_'
+                                    + line[prop_indices['ptnr2_label_seq_id']] + '_'
+                                    + line[prop_indices['pdbx_ptnr2_PDB_ins_code']])
+                            ss_bonds[bond_num] = [res1, res2]
+                    except IndexError:
+                        ss_bonds = {}
+                        break
+
+    return (resolution, rwork, rfree, temperature, seqres, ss_bonds)
 
 
 def find_aa_properties(seqres, mass_dict):
@@ -232,13 +260,14 @@ def find_aa_properties(seqres, mass_dict):
     return size, glu_asp_count, glu_asp_percent, non_canonical_aa_count
 
 
-def find_peratom_properties(atom_lines, seqres):
+def find_peratom_properties(atom_lines, seqres, ss_bonds):
     """
     Finds structure properties in the PDB ATOM / HETATM records
     """
 
     all_reprocessed = False
     asp_glu_reprocessed = False
+    cys_reprocessed = False
     single_model = True
 
     alternate_conformers = {}
@@ -254,20 +283,30 @@ def find_peratom_properties(atom_lines, seqres):
                 all_reprocessed = True
                 if line['label_comp_id'] in ['ASP', 'GLU']:
                     asp_glu_reprocessed = True
+
             elif line['label_alt_id'] != ' ':
-                atom_id = '_'.join([line['label_entity_id'], line['label_seq_id'],
-                                    line['label_comp_id'], line['label_atom_id']])
+                atom_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
+                                    line['pdbx_PDB_ins_code'], line['label_comp_id'],
+                                    line['label_atom_id']])
                 if not atom_id in alternate_conformers:
                     alternate_conformers[atom_id] = []
                 alternate_conformers[atom_id].append(float(line['occupancy']))
+
+            # Checks for disulfide bonds with sub-1 occupancy
+            if (
+                '_'.join([line['label_asym_id'], line['label_seq_id'], line['pdbx_PDB_ins_code']])
+                in [res for bond in ss_bonds.values() for res in bond]
+            ):
+                cys_reprocessed = True
 
         # Finds terminal O atoms
         if (
                 line['label_comp_id'] in ['ASP', 'GLU']
             and line['label_atom_id'] in ['OD1', 'OD2', 'OE1', 'OE2']
         ):
-            atom_id = '_'.join([line['label_entity_id'], line['label_seq_id'],
-                                line['label_comp_id'], line['label_atom_id']])
+            atom_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
+                                line['pdbx_PDB_ins_code'], line['label_comp_id'],
+                                line['label_atom_id']])
             terminal_o_atoms.append(atom_id)
 
         # Checks only a single model present
@@ -278,13 +317,14 @@ def find_peratom_properties(atom_lines, seqres):
     for atom_id in alternate_conformers.keys():
         if sum(alternate_conformers[atom_id]) != 1.0:
             all_reprocessed = True
-            if atom_id.split('_')[2] in ['ASP', 'GLU']:
+            if atom_id.split('_')[3] in ['ASP', 'GLU']:
                 asp_glu_reprocessed = True
 
     # Calculates total number of terminal O atoms
     num_terminal_o_atoms = len(set(terminal_o_atoms))
 
-    return num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed, single_model
+    return (num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed,
+            cys_reprocessed, single_model)
 
 
 def find_non_per_atom_b_factors(atom_lines, seqres):
@@ -296,8 +336,9 @@ def find_non_per_atom_b_factors(atom_lines, seqres):
     res_bfactors = {}
     for i, line in atom_lines.items():
         if line['label_comp_id'] in [res for chain in seqres.values() for res in chain]:
-            res_id = '_'.join([line['label_entity_id'], line['label_seq_id'],
-                               line['label_alt_id'], line['label_comp_id']])
+            res_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
+                               line['pdbx_PDB_ins_code'], line['label_alt_id'],
+                               line['label_comp_id']])
             atom_id = line['label_atom_id']
             if not res_id in res_bfactors:
                 res_bfactors[res_id] = {}
@@ -335,7 +376,7 @@ def write_pdb_properties():
     plus their Bnet values to a dataframe
     """
 
-    with open('Protein_and_NA_PDB_IDs/Protein_PDB_IDs.txt', 'r') as f:
+    with open('Protein_and_NA_PDB_IDs/Protein_PDB_IDs_test.txt', 'r') as f:
         protein_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
 
     with open('Protein_and_NA_PDB_IDs/NA_PDB_IDs.txt', 'r') as f:
@@ -377,6 +418,7 @@ def write_pdb_properties():
                                     'RSRZ relative to all structures': [],
                                     'RSRZ relative to similar res structures': [],
                                     'Reprocessing required? (all conformers)': [],
+                                    'Reprocessing required? (disulfide bonds)': [],
                                     'Reprocessing required? (asp and glu conformers)': [],
                                     'Bnet': []})
 
@@ -420,12 +462,12 @@ def write_pdb_properties():
         electron_density = check_e_dens(pdb_code)
         (rsrz_outliers_all, rsrz_outliers_sim_res, wilson_b
         ) = check_rsrz_outliers(pdb_code)
-        (resolution, rwork, rfree, temperature, seqres
+        (resolution, rwork, rfree, temperature, seqres, ss_bonds
         ) = find_structurewide_properties(pdb_lines)
         (size, glu_asp_count, glu_asp_percent, non_canonical_aa_count
         ) = find_aa_properties(seqres, mass_dict)
-        (num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed, single_model
-        ) = find_peratom_properties(atom_lines, seqres)
+        (num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed, cys_reprocessed,
+         single_model) = find_peratom_properties(atom_lines, seqres, ss_bonds)
         per_atom_b_factors = find_non_per_atom_b_factors(atom_lines, seqres)
         if (
                np.isnan(resolution)
@@ -464,6 +506,7 @@ def write_pdb_properties():
                                     'RSRZ relative to all structures': [rsrz_outliers_all],
                                     'RSRZ relative to similar res structures': [rsrz_outliers_sim_res],
                                     'Reprocessing required? (all conformers)': [all_reprocessed],
+                                    'Reprocessing required? (disulfide bonds)': [cys_reprocessed],
                                     'Reprocessing required? (asp and glu conformers)': [asp_glu_reprocessed],
                                     'Bnet': [bnet]})
         all_pdbs_df = pd.concat([all_pdbs_df, indv_pdb_df], axis=0, ignore_index=True)
