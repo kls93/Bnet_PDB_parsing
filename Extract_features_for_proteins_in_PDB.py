@@ -186,7 +186,7 @@ def find_structurewide_properties(pdb_lines):
                 elif not any(line.startswith(x) for x in ['_', 'loop_']):
                     line = line.split()
                     try:
-                       i1 = prop_indices['entity_id']
+                        i1 = prop_indices['entity_id']
                         if not line[i1] in seqres:
                             seqres[line[i1]] = []
                         i2 = prop_indices['mon_id']
