@@ -88,37 +88,34 @@ def check_rsrz_outliers(pdb_code):
     return rsrz_outliers_all, rsrz_outliers_sim_res, wilson_b
 
 
-def calc_bnet(pdb_code):
+def calc_bnet(pdb_code, cif_path, output_dir, rabdam_dir):
     """
     Runs RABDAM to calculate Bnet value
     """
 
     bnet = np.nan
 
-    os.system('echo "{},dir=/Volumes/Seagate_Backup_Plus_Drive/RABDAM_for_PDB/,'
-              'batchContinue=True,overwrite=True"> temp_rabdam_input.txt'.format(pdb_code))
-    os.system('python /Volumes/Seagate_Backup_Plus_Drive/RABDAM_for_PDB/RABDAM'
-              '/rabdam/rabdam.py -i temp_rabdam_input.txt -o bnet')
+    os.system('echo "{},dir={},batchContinue=False,'
+              'overwrite=True"> temp_rabdam_input.txt'.format(cif_path, output_dir))
+    os.system('python {}/rabdam/rabdam.py -i temp_rabdam_input.txt -o bnet'.format(rabdam_dir))
     os.remove('temp_rabdam_input.txt')
 
     try:
-        bnet_df = pd.read_pickle(
-            '/Volumes/Seagate_Backup_Plus_Drive/RABDAM_for_PDB/Logfiles/Bnet_Protein.pkl'
-        )
+        bnet_df = pd.read_pickle('{}/Logfiles/Bnet_Protein.pkl'.format(output_dir))
         try:
             index = bnet_df['PDB'].tolist().index(pdb_code.upper())
             bnet = bnet_df['Bnet'][index]
         except ValueError:
             pass
     except FileNotFoundError:
-        pass
+        raise FileNotFoundError('{}/Logfiles/Bnet_Protein.pkl doesn\'t exist'.format(output_dir))
 
     return bnet
 
 
-def find_structurewide_properties(pdb_lines):
+def find_structurewide_properties(cif_lines):
     """
-    Finds structure properties in the PDB header
+    Finds structure properties in the mmCIF file header
     """
 
     resolution = np.nan
@@ -128,7 +125,7 @@ def find_structurewide_properties(pdb_lines):
     seqres = {}
     ss_bonds = {}
 
-    for subsection in pdb_lines:
+    for subsection in cif_lines:
         # Finds structure resolution
         if '_refine.ls_d_res_high' in subsection:
             sub_lines = subsection.split('\n')
@@ -224,6 +221,45 @@ def find_structurewide_properties(pdb_lines):
                         break
 
     return (resolution, rwork, rfree, temperature, seqres, ss_bonds)
+
+def find_b_factor_restraints(pdb_code, json_lines):
+    """
+    Finds the strength of the B-factor restraints applied in the final round of
+    refinement of PDB-REDO structures
+    """
+
+    bfac_rest_weight = np.nan
+    bfac_model = np.nan
+    tls_model = np.nan
+
+    model_conv_dict = {'ISOT': 'isotropic',
+                       'ANISOT': 'anisotropic',
+                       'OVER': 'flat'}
+
+    for line in json_lines:
+        if '\"BBEST\":' in line:
+            try:
+                bfac_rest_weight = float(line.split(':')[1].replace('\"', ''))
+            except ValueError:
+                pass
+        elif '\"BREFTYPE\":' in line:
+            bfac_model_raw = line.split(':')[1].replace('\"', '').replace(' ', '')
+            try:
+                bfac_model = model_conv_dict[bfac_model_raw]
+            except KeyError:
+                pass
+        # 0 = No TLS performed, otherwise denotes the number of TLS groups refined
+        elif '\"NTLS\":' in line:
+            tls_model_num = line.split(':')[1]
+            try:
+                if int(tls_model_num) == float(tls_model_num):
+                    tls_model = int(tls_model_num)
+                else:
+                    pass
+            except ValueError:
+                pass
+
+    return (bfac_rest_weight, bfac_model, tls_model)
 
 
 def find_aa_properties(seqres, mass_dict):
@@ -373,34 +409,26 @@ def find_non_per_atom_b_factors(atom_lines, seqres):
 
 def write_pdb_properties():
     """
-    Writes properties of protein stuctures in the PDB circa 9th November 2019
+    Writes properties of protein stuctures in the PDB circa 17th November 2020
     plus their Bnet values to a dataframe
     """
 
-    with open('Protein_and_NA_PDB_IDs/Protein_PDB_IDs.txt', 'r') as f:
+    cif_dir = '/home/shared/structural_bioinformatics/pdb_redo'
+    work_dir = '/home/shared/structural_bioinformatics/RABDAM/PDB_parsing_output'
+    rabdam_dir = 'home/shared/structural_bioinformatics/RABDAM'
+
+    with open('{}/rabdam_protein_pdb_ids_201119.txt'.format(rabdam_dir), 'r') as f:
         protein_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
 
-    with open('Protein_and_NA_PDB_IDs/NA_PDB_IDs.txt', 'r') as f:
-        na_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
-
-    with open('Protein_and_NA_PDB_IDs/XFEL_PDB_IDs.txt', 'r') as f:
-        xfel_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
-
-    if bool(set(protein_pdbs) & set(na_pdbs)):
-        raise Exception(
-            'Overlap between protein only and nucleic acid containing PDB'
-            'accession code lists'
-        )
-
-    if not os.path.isdir('PDB_parsing_output'):
-        os.mkdir('PDB_parsing_output')
-    if not os.path.isfile('PDB_parsing_output/Progress_track.txt'):
-        with open('PDB_parsing_output/Progress_track.txt', 'w') as f:
+    if not os.path.isdir(work_dir):
+        os.mkdir(work_dir)
+    if not os.path.isfile('{}/Progress_track.txt'.format(work_dir)):
+        with open('{}/Progress_track.txt'.format(work_dir), 'w') as f:
             f.write('PDBs processed so far:\n')
-    if not os.path.isfile('PDB_parsing_output/Unprocessed_PDBs.txt'):
-        with open('PDB_parsing_output/Unprocessed_PDBs.txt', 'w') as f:
+    if not os.path.isfile('{}/Unprocessed_PDBs.txt'.format(work_dir)):
+        with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'w') as f:
             f.write('PDBs unable to be processed:\n')
-    if os.path.isfile('PDB_parsing_output/PDB_file_properties.pkl'):
+    if os.path.isfile('{}/PDB_file_properties.pkl'.format(work_dir)):
         all_pdbs_df = pd.read_pickle('PDB_parsing_output/PDB_file_properties.pkl')
     else:
         all_pdbs_df = pd.DataFrame({'PDB code': [],
@@ -418,32 +446,47 @@ def write_pdb_properties():
                                     'Wilson plot B-factor (A^2)': [],
                                     'RSRZ relative to all structures': [],
                                     'RSRZ relative to similar res structures': [],
-                                    'Reprocessing required? (all conformers)': [],
-                                    'Reprocessing required? (disulfide bonds)': [],
-                                    'Reprocessing required? (asp and glu conformers)': [],
+                                    'Sub-1 occupancy (all conformers)': [],
+                                    'Sub-1 occupancy (disulfide bonds)': [],
+                                    'Sub-1 occupancy (asp and glu conformers)': [],
+                                    'B-factor restraint weight': [],
+                                    'B-factor model': [],
+                                    'Number of TLS groups': [],
                                     'Bnet': []})
 
     structure_count = 0
     for pdb_code in protein_pdbs:
-        # Marks progress
+        # Tracks progress
         structure_count += 1
         print('{}: {}'.format(pdb_code, (structure_count/len(protein_pdbs))))
-        with open('PDB_parsing_output/Progress_track.txt', 'a') as f:
+        with open('{}/Progress_track.txt'.format(work_dir), 'a') as f:
             f.write('{}\n'.format(pdb_code))
 
-        # Downloads PDB file of asymmetric unit and extracts
-        pdb_request = requests.get(
-            'https://files.rcsb.org/download/{}.cif'.format(pdb_code.lower())
-        )
-        if pdb_request.status_code != 200:
-            with open('PDB_parsing_output/Unprocessed_PDBs.txt', 'a') as f:
+        # Opens mmCIF PDB-REDO file
+        try:
+            with open(
+                '{}/{}/{}/{}_final.cif'.format(cif_dir, pdb_code[1:3], pdb_code, pdb_code), 'r'
+            ) as f:
+                cif_lines = f.read().split('#')
+        except FileNotFoundError:
+            with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
                 f.write('{}\n'.format(pdb_code))
-            print('WARNING: Failed to process {}'.format(pdb_code))
             continue
 
-        pdb_lines = pdb_request.text.split('#')
+        # Opens PDB-REDO json file
+        try:
+            with open(
+                '{}/{}/{}/data.json'.format(cif_dir, pdb_code[1:3], pdb_code), 'r'
+            ) as f:
+                json_lines = f.read().split('\n')
+        except FileNotFoundError:
+            with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
+                f.write('{}\n'.format(pdb_code))
+            continue
+
+        # Generates dictionary of properties for each atom
         atom_lines = {}
-        for subsection in pdb_lines:
+        for subsection in cif_lines:
             if '_atom_site.group_PDB' in subsection:
                 lines = [line for line in subsection.split('\n')
                          if not line.strip() in ['', 'loop_']]
@@ -459,17 +502,22 @@ def write_pdb_properties():
                         for prop in prop_indices.keys():
                             atom_lines[i1][prop] = line.split()[prop_indices[prop]]
 
-        # Finds structure properties of interest
+        # Finds structural properties of interest
         electron_density = check_e_dens(pdb_code)
         (rsrz_outliers_all, rsrz_outliers_sim_res, wilson_b
         ) = check_rsrz_outliers(pdb_code)
         (resolution, rwork, rfree, temperature, seqres, ss_bonds
-        ) = find_structurewide_properties(pdb_lines)
+        ) = find_structurewide_properties(cif_lines)
         (size, glu_asp_count, glu_asp_percent, non_canonical_aa_count
         ) = find_aa_properties(seqres, mass_dict)
         (num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed, cys_reprocessed,
          single_model) = find_peratom_properties(atom_lines, seqres, ss_bonds)
         per_atom_b_factors = find_non_per_atom_b_factors(atom_lines, seqres)
+        bfac_rest_weight, bfac_model, tls_model = find_b_factor_restraints(
+            pdb_code, json_lines
+        )
+
+        # Filters out PDBs with unsuitable properties for Bnet calculation
         if (
                np.isnan(resolution)
             or np.isnan(temperature)
@@ -478,13 +526,16 @@ def write_pdb_properties():
             or single_model is False
             or per_atom_b_factors is False
         ):
-            with open('PDB_parsing_output/Unprocessed_PDBs.txt', 'a') as f:
+            with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
                 f.write('{}\n'.format(pdb_code))
             print('WARNING: {} unsuitable for Bnet calculation'.format(pdb_code))
             continue
-        bnet = calc_bnet(pdb_code)
+
+        # Calculates Bnet
+        cif_path = '{}/{}/{}/{}_final.cif'.format(cif_dir, pdb_code[1:3], pdb_code, pdb_code)
+        bnet = calc_bnet(pdb_code, cif_path, work_dir, rabdam_dir)
         if np.isnan(bnet):
-            with open('PDB_parsing_output/Unprocessed_PDBs.txt', 'a') as f:
+            with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
                 f.write('{}\n'.format(pdb_code))
             print('WARNING: Failed to calculate Bnet for {}'.format(pdb_code))
             continue
@@ -506,9 +557,12 @@ def write_pdb_properties():
                                     'Wilson plot B-factor (A^2)': [wilson_b],
                                     'RSRZ relative to all structures': [rsrz_outliers_all],
                                     'RSRZ relative to similar res structures': [rsrz_outliers_sim_res],
-                                    'Reprocessing required? (all conformers)': [all_reprocessed],
-                                    'Reprocessing required? (disulfide bonds)': [cys_reprocessed],
-                                    'Reprocessing required? (asp and glu conformers)': [asp_glu_reprocessed],
+                                    'Sub-1 occupancy (all conformers)': [all_reprocessed],
+                                    'Sub-1 occupancy (disulfide bonds)': [cys_reprocessed],
+                                    'Sub-1 occupancy (asp and glu conformers)': [asp_glu_reprocessed],
+                                    'B-factor restraint weight': [bfac_rest_weight],
+                                    'B-factor model': [bfac_model],
+                                    'Number of TLS groups': [tls_model],
                                     'Bnet': [bnet]})
         all_pdbs_df = pd.concat([all_pdbs_df, indv_pdb_df], axis=0, ignore_index=True)
         all_pdbs_df.to_pickle('PDB_parsing_output/PDB_file_properties.pkl')
@@ -522,48 +576,65 @@ def calc_bnet_percentile(all_pdbs_df):
     value to the Bnet values of structures (min. 1000) of a similar resolution
     """
 
-    bnet_percentile_df = [np.nan]*all_pdbs_df.shape[0]
+    work_dir = '/home/shared/structural_bioinformatics/RABDAM/PDB_parsing_output'
+    if not os.path.isfile('{}/Bnet_percentile_unprocessed_pdbs.txt'.format(work_dir)):
+        with open('{}/Bnet_percentile_unprocessed_pdbs.txt'.format(work_dir), 'w') as f:
+            f.write('Structures with a null / infinite Bnet value (which is '
+                    'hence unsuitable for percentile calculations)\n')
+
+    resolution_percentile = [np.nan]*all_pdbs_df.shape[0]
+    restraint_percentile = [np.nan]*all_pdbs_df.shape[0]
 
     for row in range(all_pdbs_df.shape[0]):
         pdb_code = all_pdbs_df['PDB code'][row]
         resolution = all_pdbs_df['Resolution (A)'][row]
+        restraint = all_pdbs_df['B-factor restraint weight'][row]
         bnet = all_pdbs_df['Bnet'][row]
         if np.isnan(bnet) or np.isinf(bnet):
             print('WARNING: Not calculating Bnet percentile for {}'.format(pdb_code))
+            with open('{}/Bnet_percentile_unprocessed_pdbs.txt'.format(work_dir), 'a') as f:
+                f.write('{}\n'.format(pdb_code))
             continue
 
         print('Calculating Bnet percentile for {} {}'.format(
             pdb_code, ((row+1) / all_pdbs_df.shape[0])
         ))
 
-        resolution_array = copy.deepcopy(all_pdbs_df['Resolution (A)']).to_numpy()
+        for percentile_tup in [
+             [resolution, 'Resolution (A)', resolution_percentile],
+             [restraint, 'B-factor restraint weight', restraint_percentile]
+        ]:
+            prop_num = percentile_tup[0]
+            prop_name = percentile_tup[1]
+            percentile = percentile_tup[2]
 
-        surr_struct_indices = []
-        surr_struct_resns = []
-        for num in range(1000):
-            index = (np.abs(resolution_array-resolution)).argmin()
-            nearest_resn = resolution_array[index]
-            surr_struct_indices.append(index)
-            surr_struct_resns.append(nearest_resn)
-            resolution_array[index] = np.inf
+            array = copy.deepcopy(all_pdbs_df[prop_name]).to_numpy()
+            surr_struct_indices = []
+            surr_struct_vals = []
+            for num in range(1000):
+                index = (np.abs(array-prop_num)).argmin()
+                nearest_prop_val = array[index]
+                surr_struct_indices.append(index)
+                surr_struct_vals.append(nearest_prop_val)
+                array[index] = np.inf
 
-        min_resolution = min(surr_struct_resns)
-        max_resolution = max(surr_struct_resns)
-        for index, num in np.ndenumerate(resolution_array):
-            if num == min_resolution or num == max_resolution:
-                surr_struct_indices.append(index[0])
+            min_val = min(surr_struct_vals)
+            max_val = max(surr_struct_vals)
+            for index, num in np.ndenumerate(array):
+                if num == min_val or num == max_val:
+                    surr_struct_indices.append(index[0])
 
-        surr_struct_df = all_pdbs_df.iloc[surr_struct_indices].reset_index(drop=True)
-        bnet_range = np.sort(surr_struct_df['Bnet'].to_numpy())
-        bnet_percentile = (np.where(bnet_range == bnet)[0][0] + 1) / bnet_range.shape[0]
-        bnet_percentile_df[row] = bnet_percentile
+            surr_struct_df = copy.deepcopy(all_pdbs_df).iloc[surr_struct_indices].reset_index(drop=True)
+            bnet_range = np.sort(surr_struct_df['Bnet'].to_numpy())
+            bnet_percentile = (np.where(bnet_range == bnet)[0][0] + 1) / bnet_range.shape[0]
+            percentile[row] = bnet_percentile
 
-    bnet_percentile_df = pd.DataFrame({'Bnet percentile': bnet_percentile_df})
+    bnet_percentile_df = pd.DataFrame({'Bnet percentile (resolution)': resolution_percentile,
+                                       'Bnet percentile (restraint weight)': restraint_percentile})
     bnet_percentile_df = pd.concat(
         [all_pdbs_df, bnet_percentile_df], axis=1
     ).reset_index(drop=True)
-    bnet_percentile_df.to_pickle('PDB_parsing_output/PDB_file_properties.pkl')
-    bnet_percentile_df.to_csv('PDB_parsing_output/PDB_file_properties.csv', index=False)
-    all_pdbs_df.to_pickle('PDB_parsing_output/Old_PDB_file_properties_just_in_case.pkl')
+    bnet_percentile_df.to_pickle('{}/PDB_file_properties_percentile.pkl'.format(work_dir))
+    bnet_percentile_df.to_csv('{}/PDB_file_properties_percentile.csv'.format(work_dir), index=False)
 
-    return all_pdbs_df, bnet_percentile_df
+    return bnet_percentile_df
