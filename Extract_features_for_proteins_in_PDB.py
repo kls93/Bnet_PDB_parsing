@@ -13,42 +13,8 @@ import pandas as pd
 
 
 # Residue masses
-mass_dict = {'ALA': 89.1,
-             'ARG': 174.2,
-             'ASN': 132.1,
-             'ASP': 133.1,
-             'CYS': 121.2,
-             'GLN': 146.2,
-             'GLU': 147.1,
-             'GLY': 75.1,
-             'HIS': 155.2,
-             'ILE': 131.2,
-             'LEU': 131.2,
-             'LYS': 146.2,
-             'MET': 149.2,
-             'MSE': 196.1,
-             'PHE': 165.2,
-             'PRO': 115.1,
-             'SER': 105.1,
-             'THR': 119.1,
-             'TRP': 204.2,
-             'TYR': 181.2,
-             'VAL': 117.1}
-
-
-def check_e_dens(pdb_code):
-    """
-    Checks that reliable electron density map can be downloaded from the
-    Uppsala Electron Density Server
-    """
-
-    electron_density = True
-    server_response = requests.get('http://eds.bmc.uu.se/cgi-bin/eds/'
-                                   'uusfs?pdbCode={}'.format(pdb_code.lower())).text
-    if 'sorry' in server_response:
-        electron_density = False
-
-    return electron_density
+from Amino_acid_masses import amino_acid_masses
+mass_dict = amino_acid_masses()
 
 
 def check_rsrz_outliers(pdb_code):
@@ -56,6 +22,9 @@ def check_rsrz_outliers(pdb_code):
     Finds the Wilson B value, plus RSRZ outlier percentile values as compared
     to 1) all structures in the PDB and 2) structures of a similar resolution,
     from a structure's xml PDB validation report.
+    *** Currently not in use to calculate RSRZ outlier values because RABDAM is
+    being run on the PDB-REDO database, and these values as far as I can tell
+    can only be obtained for the original PDB structures ***
     """
 
     rsrz_outliers_all = np.nan
@@ -85,7 +54,7 @@ def check_rsrz_outliers(pdb_code):
         except (ValueError, IndexError):
             pass
 
-    return rsrz_outliers_all, rsrz_outliers_sim_res, wilson_b
+    return wilson_b
 
 
 def calc_bnet(pdb_code, cif_path, output_dir, rabdam_dir):
@@ -93,22 +62,30 @@ def calc_bnet(pdb_code, cif_path, output_dir, rabdam_dir):
     Runs RABDAM to calculate Bnet value
     """
 
+    pdb_final = '{}_FINAL'.format(pdb_code.upper())
     bnet = np.nan
 
-    os.system('echo "{},dir={},batchContinue=False,'
-              'overwrite=True"> temp_rabdam_input.txt'.format(cif_path, output_dir))
-    os.system('python {}/rabdam/rabdam.py -i temp_rabdam_input.txt -o bnet'.format(rabdam_dir))
-    os.remove('temp_rabdam_input.txt')
+    os.system('echo "{},outputdir={},batchContinue=True,overwrite=True,PDT=7,'
+              'windowSize=0.02,HETATM=Remove,proteinOrNucleicAcid=Protein"> '
+              '{}/temp_rabdam_input.txt'.format(cif_path, output_dir, output_dir))
+    os.system('python {}/rabdam/rabdam.py -i {}/temp_rabdam_input.txt -o '
+              'bnet'.format(rabdam_dir, output_dir))
+    os.remove('{}/temp_rabdam_input.txt'.format(output_dir))
 
     try:
-        bnet_df = pd.read_pickle('{}/Logfiles/Bnet_Protein.pkl'.format(output_dir))
-        try:
-            index = bnet_df['PDB'].tolist().index(pdb_code.upper())
-            bnet = bnet_df['Bnet'][index]
-        except ValueError:
+        bnet_df = pd.read_pickle('{}/Logfiles/Bnet_protein.pkl'.format(output_dir))
+        count = bnet_df['PDB'].tolist().count(pdb_final)
+        if count != 1:
             pass
+        else:
+            try:
+                index = bnet_df['PDB'].tolist().index(pdb_final)
+                bnet = bnet_df['Bnet'][index]
+            except ValueError:
+                bnet = np.nan
+                pass
     except FileNotFoundError:
-        raise FileNotFoundError('{}/Logfiles/Bnet_Protein.pkl doesn\'t exist'.format(output_dir))
+        raise FileNotFoundError('{}/Logfiles/Bnet_protein.pkl doesn\'t exist'.format(output_dir))
 
     return bnet
 
@@ -171,24 +148,24 @@ def find_structurewide_properties(cif_lines):
                     break
 
         # Finds residues in asymmetric unit
-        if '_entity_poly_seq.' in subsection:
+        if '_pdbx_poly_seq_scheme.' in subsection:
             sub_lines = [line for line in subsection.split('\n')
                          if not line.strip() in ['', 'loop_']]
             prop_indices = {}
             prop_num = 0
             for line in sub_lines:
-                if line.startswith('_entity_poly_seq.'):
+                if line.startswith('_pdbx_poly_seq_scheme'):
                     prop = line.split('.')[1].strip()
                     prop_indices[prop] = prop_num
                     prop_num += 1
                 elif not line.startswith('_'):
                     line = line.split()
                     try:
-                        i1 = prop_indices['entity_id']
-                        if not line[i1] in seqres:
-                            seqres[line[i1]] = []
-                        i2 = prop_indices['mon_id']
-                        seqres[line[i1]].append(line[i2].upper())
+                        chain_id = line[prop_indices['asym_id']]
+                        res_id = line[prop_indices['mon_id']]
+                        if not chain_id in list(seqres.keys()):
+                            seqres[chain_id] = []
+                        seqres[chain_id].append(res_id)
                     except (KeyError, IndexError):
                         seqres = {}
                         break
@@ -215,7 +192,11 @@ def find_structurewide_properties(cif_lines):
                             res2 = (  line[prop_indices['ptnr2_label_asym_id']] + '_'
                                     + line[prop_indices['ptnr2_label_seq_id']] + '_'
                                     + line[prop_indices['pdbx_ptnr2_PDB_ins_code']])
-                            ss_bonds[bond_num] = [res1, res2]
+                            if (
+                                    line[prop_indices['ptnr1_label_comp_id']] == 'CYS'
+                                and line[prop_indices['ptnr2_label_comp_id']] == 'CYS'
+                            ):
+                                ss_bonds[bond_num] = [res1, res2]
                     except (KeyError, IndexError):
                         ss_bonds = {}
                         break
@@ -238,19 +219,24 @@ def find_b_factor_restraints(pdb_code, json_lines):
 
     for line in json_lines:
         if '\"BBEST\":' in line:
-            try:
-                bfac_rest_weight = float(line.split(':')[1].replace('\"', ''))
-            except ValueError:
-                pass
+            # "null" = default weight of 1.0 used
+            bfac_rest_str = line.split(':')[1].replace('\"', '').replace(',', '').strip()
+            if bfac_rest_str.lower() == 'null':
+                bfac_rest_weight = 1.0
+            else:
+                try:
+                    bfac_rest_weight = float(bfac_rest_str)
+                except ValueError:
+                    pass
         elif '\"BREFTYPE\":' in line:
-            bfac_model_raw = line.split(':')[1].replace('\"', '').replace(' ', '')
+            bfac_model_raw = line.split(':')[1].replace('\"', '').replace(',', '').replace(' ', '')
             try:
                 bfac_model = model_conv_dict[bfac_model_raw]
             except KeyError:
                 pass
         # 0 = No TLS performed, otherwise denotes the number of TLS groups refined
         elif '\"NTLS\":' in line:
-            tls_model_num = line.split(':')[1]
+            tls_model_num = line.split(':')[1].replace('\"', '').replace(',', '')
             try:
                 if int(tls_model_num) == float(tls_model_num):
                     tls_model = int(tls_model_num)
@@ -267,8 +253,12 @@ def find_aa_properties(seqres, mass_dict):
     Calculates structure size and asp / glu content from seqres lines of PDB file
     """
 
+    canonical_aas = ['ALA', 'ARG', 'ASN', 'ASP', 'CYS', 'GLN', 'GLU', 'GLY',
+                     'HIS', 'ILE', 'LEU', 'LYS', 'MET', 'PHE', 'PRO', 'SER',
+                     'THR', 'TRP', 'TYR', 'VAL']
     size = 0
     glu_asp_count = 0
+    glu_asp_ld_count = 0
     non_canonical_aa_count = 0
 
     # Counts number of glutamate and aspartate residues and size of structure
@@ -284,7 +274,9 @@ def find_aa_properties(seqres, mass_dict):
                 size += mass_dict[res]
                 if res in ['GLU', 'ASP']:
                     glu_asp_count += 1
-            else:
+                if res in ['GLU', 'ASP', 'DGL', 'DAS']:
+                    glu_asp_ld_count += 1
+            if not res.upper() in canonical_aas:
                 non_canonical_aa_count += 1
 
         size -= ((sub_count - 1) * 18.015)
@@ -294,7 +286,11 @@ def find_aa_properties(seqres, mass_dict):
     except ZeroDivisionError:
         glu_asp_percent = 0
 
-    return size, glu_asp_count, glu_asp_percent, non_canonical_aa_count
+    # Converts to kDa
+    size = size / 1000
+
+    return (size, glu_asp_count, glu_asp_ld_count, glu_asp_percent,
+            non_canonical_aa_count)
 
 
 def find_peratom_properties(atom_lines, seqres, ss_bonds):
@@ -302,66 +298,77 @@ def find_peratom_properties(atom_lines, seqres, ss_bonds):
     Finds structure properties in the PDB ATOM / HETATM records
     """
 
-    all_reprocessed = False
-    asp_glu_reprocessed = False
-    cys_reprocessed = False
+    sub_1_any = False
+    sub_1_asp_glu = False
+    sub_1_disulfide = False
     single_model = True
+
+    seqres_list = [res for chain in seqres.values() for res in chain]
+    ss_list = [res for bond in ss_bonds.values() for res in bond]
 
     alternate_conformers = {}
     terminal_o_atoms = []
 
-    for i, line in atom_lines.items():
+    for line in atom_lines:
         # Checks ATOM records for sub-1 occupancy non-alternate conformers
-        if (
-                line['label_comp_id'] in [res for chain in seqres.values() for res in chain]
-            and float(line['occupancy']) != 1.0
-        ):
-            if line['label_alt_id'] == ' ':
-                all_reprocessed = True
-                if line['label_comp_id'] in ['ASP', 'GLU']:
-                    asp_glu_reprocessed = True
+        res_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
+                           line['pdbx_PDB_ins_code']])
+        atom_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
+                            line['pdbx_PDB_ins_code'], line['label_comp_id'],
+                            line['label_atom_id']])
 
-            elif line['label_alt_id'] != ' ':
-                atom_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
-                                    line['pdbx_PDB_ins_code'], line['label_comp_id'],
-                                    line['label_atom_id']])
+        try:
+            occupancy = float(line['occupancy'])
+        except ValueError:
+            sub_1_any = np.nan
+            sub_1_asp_glu = np.nan
+            sub_1_disulfide = np.nan
+            alternate_conformers = {}
+            break
+
+        if (line['label_comp_id'] in seqres_list) and (occupancy != 1.0):
+            if line['label_alt_id'] in ['.', '?']:
+                sub_1_any = True
+                if line['label_comp_id'] in ['ASP', 'GLU', 'DGL', 'DAS']:
+                    sub_1_asp_glu = True
+            else:
                 if not atom_id in alternate_conformers:
-                    alternate_conformers[atom_id] = []
-                alternate_conformers[atom_id].append(float(line['occupancy']))
+                    alternate_conformers[atom_id] = {}
+                alternate_conformers[atom_id][line['label_alt_id']] = occupancy
 
             # Checks for disulfide bonds with sub-1 occupancy
-            if (
-                '_'.join([line['label_asym_id'], line['label_seq_id'], line['pdbx_PDB_ins_code']])
-                in [res for bond in ss_bonds.values() for res in bond]
-            ):
-                cys_reprocessed = True
+            if (res_id in ss_list) and (line['label_comp_id'] == 'CYS'):
+                sub_1_disulfide = True
 
         # Finds terminal O atoms
         if (
-                line['label_comp_id'] in ['ASP', 'GLU']
-            and line['label_atom_id'] in ['OD1', 'OD2', 'OE1', 'OE2']
+                (line['label_comp_id'] in ['ASP', 'GLU', 'DGL', 'DAS'])
+            and (line['label_atom_id'] in ['OD1', 'OD2', 'OE1', 'OE2'])
         ):
-            atom_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
-                                line['pdbx_PDB_ins_code'], line['label_comp_id'],
-                                line['label_atom_id']])
             terminal_o_atoms.append(atom_id)
 
+    for line in atom_lines:
         # Checks only a single model present
-        if float(line['pdbx_PDB_model_num']) != 1:
-            single_model = False
+        try:
+            if float(line['pdbx_PDB_model_num']) != 1:
+                single_model = False
+        except ValueError:
+            single_model = np.nan
+            break
 
     # Checks that the occupancies of all alternate conformers sum to 1
-    for atom_id in alternate_conformers.keys():
-        if sum(alternate_conformers[atom_id]) != 1.0:
-            all_reprocessed = True
-            if atom_id.split('_')[3] in ['ASP', 'GLU']:
-                asp_glu_reprocessed = True
+    for atom_id, conformers_dict in alternate_conformers.items():
+        occupancies = list(conformers_dict.values())
+        if np.sum(occupancies) != 1.0:
+            sub_1_any = True
+            if atom_id.split('_')[3] in ['ASP', 'GLU', 'DGL', 'DAS']:
+                sub_1_asp_glu = True
 
     # Calculates total number of terminal O atoms
     num_terminal_o_atoms = len(set(terminal_o_atoms))
 
-    return (num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed,
-            cys_reprocessed, single_model)
+    return (num_terminal_o_atoms, sub_1_any, sub_1_asp_glu,
+            sub_1_disulfide, single_model)
 
 
 def find_non_per_atom_b_factors(atom_lines, seqres):
@@ -370,12 +377,20 @@ def find_non_per_atom_b_factors(atom_lines, seqres):
     with the same B-factor values
     """
 
+    seqres_list = [res for chain in seqres.values() for res in chain]
+    per_atom_b_factors = np.nan
+
     res_bfactors = {}
-    for i, line in atom_lines.items():
-        if line['label_comp_id'] in [res for chain in seqres.values() for res in chain]:
+    for line in atom_lines:
+        try:
+            bfac = float(line['B_iso_or_equiv'])
+        except ValueError:
+            per_atom_b_factors = np.nan
+            return per_atom_b_factors
+
+        if line['label_comp_id'] in seqres_list:
             res_id = '_'.join([line['label_asym_id'], line['label_seq_id'],
-                               line['pdbx_PDB_ins_code'], line['label_alt_id'],
-                               line['label_comp_id']])
+                               line['pdbx_PDB_ins_code'], line['label_alt_id']])
             atom_id = line['label_atom_id']
             if not res_id in res_bfactors:
                 res_bfactors[res_id] = {}
@@ -395,7 +410,6 @@ def find_non_per_atom_b_factors(atom_lines, seqres):
         ):
             per_res_bfactor_count += 1
 
-    per_atom_b_factors = ''
     thresh = len(res_bfactors)*0.2
     if thresh < 3:
         thresh = 3
@@ -407,17 +421,22 @@ def find_non_per_atom_b_factors(atom_lines, seqres):
     return per_atom_b_factors
 
 
-def write_pdb_properties():
+def write_pdb_properties(num):
     """
     Writes properties of protein stuctures in the PDB circa 17th November 2020
     plus their Bnet values to a dataframe
     """
 
-    cif_dir = '/home/shared/structural_bioinformatics/pdb_redo'
-    work_dir = '/home/shared/structural_bioinformatics/RABDAM/PDB_parsing_output'
-    rabdam_dir = 'home/shared/structural_bioinformatics/RABDAM'
+    print(num)
 
-    with open('{}/rabdam_protein_pdb_ids_201119.txt'.format(rabdam_dir), 'r') as f:
+    cif_dir = '/home/shared/structural_bioinformatics/pdb_redo'
+    work_dir = '/home/shared/structural_bioinformatics/RABDAM/PDB_parsing_output/{}/'.format(num)
+    rabdam_dir = '/home/shared/structural_bioinformatics/RABDAM'
+
+    with open(
+        '{}/RABDAM_input_files/rabdam_protein_pdb_ids_part{}_201119.'
+        'txt'.format(rabdam_dir, num), 'r'
+    ) as f:
         protein_pdbs = [pdb.strip('\n') for pdb in f.readlines() if len(pdb) == 5]
 
     if not os.path.isdir(work_dir):
@@ -429,7 +448,7 @@ def write_pdb_properties():
         with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'w') as f:
             f.write('PDBs unable to be processed:\n')
     if os.path.isfile('{}/PDB_file_properties.pkl'.format(work_dir)):
-        all_pdbs_df = pd.read_pickle('PDB_parsing_output/PDB_file_properties.pkl')
+        all_pdbs_df = pd.read_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
     else:
         all_pdbs_df = pd.DataFrame({'PDB code': [],
                                     'Resolution (A)': [],
@@ -438,17 +457,16 @@ def write_pdb_properties():
                                     'Temperature (K)': [],
                                     'Size (kDa)': [],
                                     'Num Glu and Asp': [],
+                                    'Num Glu and Asp (L and D)': [],
                                     '% Glu and Asp': [],
                                     'Num terminal O atoms': [],
                                     'Non-canonical aas count': [],
-                                    'Per-atom refined B-factors': [],
-                                    'Electron density server response': [],
                                     'Wilson plot B-factor (A^2)': [],
-                                    'RSRZ relative to all structures': [],
-                                    'RSRZ relative to similar res structures': [],
                                     'Sub-1 occupancy (all conformers)': [],
                                     'Sub-1 occupancy (disulfide bonds)': [],
                                     'Sub-1 occupancy (asp and glu conformers)': [],
+                                    'Single model': [],
+                                    'Per-atom refined B-factors': [],
                                     'B-factor restraint weight': [],
                                     'B-factor model': [],
                                     'Number of TLS groups': [],
@@ -463,9 +481,12 @@ def write_pdb_properties():
             f.write('{}\n'.format(pdb_code))
 
         # Opens mmCIF PDB-REDO file
+        cif_lines = None
         try:
             with open(
-                '{}/{}/{}/{}_final.cif'.format(cif_dir, pdb_code[1:3], pdb_code, pdb_code), 'r'
+                '{}/{}/{}/{}_final.cif'.format(
+                cif_dir, pdb_code[1:3].lower(), pdb_code.lower(), pdb_code.lower()
+                ), 'r'
             ) as f:
                 cif_lines = f.read().split('#')
         except FileNotFoundError:
@@ -474,9 +495,12 @@ def write_pdb_properties():
             continue
 
         # Opens PDB-REDO json file
+        json_lines = None
         try:
             with open(
-                '{}/{}/{}/data.json'.format(cif_dir, pdb_code[1:3], pdb_code), 'r'
+                '{}/{}/{}/data.json'.format(
+                cif_dir, pdb_code[1:3].lower(), pdb_code.lower()
+                ), 'r'
             ) as f:
                 json_lines = f.read().split('\n')
         except FileNotFoundError:
@@ -485,32 +509,33 @@ def write_pdb_properties():
             continue
 
         # Generates dictionary of properties for each atom
-        atom_lines = {}
+        atom_lines = []
         for subsection in cif_lines:
             if '_atom_site.group_PDB' in subsection:
                 lines = [line for line in subsection.split('\n')
                          if not line.strip() in ['', 'loop_']]
                 prop_indices = {}
                 prop_num = 0
-                for i1, line in enumerate(lines):
+                for line in lines:
                     if line.startswith('_atom_site.'):
                         prop = line.split('.')[1].strip()
                         prop_indices[prop] = prop_num
                         prop_num += 1
-                    elif line[0:6].strip() in ['ATOM', 'HETATM']:
-                        atom_lines[i1] = {}
-                        for prop in prop_indices.keys():
-                            atom_lines[i1][prop] = line.split()[prop_indices[prop]]
+                    else:
+                        if any(x in line for x in ['ATOM', 'HETATM']):
+                            atom_props = {}
+                            for prop, prop_index in prop_indices.items():
+                                atom_props[prop] = line.split()[prop_index]
+                            atom_lines.append(atom_props)
 
         # Finds structural properties of interest
-        electron_density = check_e_dens(pdb_code)
-        (rsrz_outliers_all, rsrz_outliers_sim_res, wilson_b
-        ) = check_rsrz_outliers(pdb_code)
         (resolution, rwork, rfree, temperature, seqres, ss_bonds
         ) = find_structurewide_properties(cif_lines)
-        (size, glu_asp_count, glu_asp_percent, non_canonical_aa_count
+        wilson_b = check_rsrz_outliers(pdb_code)
+        (size, glu_asp_count, glu_asp_ld_count, glu_asp_percent,
+         non_canonical_aa_count
         ) = find_aa_properties(seqres, mass_dict)
-        (num_terminal_o_atoms, all_reprocessed, asp_glu_reprocessed, cys_reprocessed,
+        (num_terminal_o_atoms, sub_1_any, sub_1_asp_glu, sub_1_disulfide,
          single_model) = find_peratom_properties(atom_lines, seqres, ss_bonds)
         per_atom_b_factors = find_non_per_atom_b_factors(atom_lines, seqres)
         bfac_rest_weight, bfac_model, tls_model = find_b_factor_restraints(
@@ -524,7 +549,9 @@ def write_pdb_properties():
             or size == 0
             or num_terminal_o_atoms == 0
             or single_model is False
+            or np.isnan(single_model)
             or per_atom_b_factors is False
+            or np.isnan(per_atom_b_factors)
         ):
             with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
                 f.write('{}\n'.format(pdb_code))
@@ -532,13 +559,16 @@ def write_pdb_properties():
             continue
 
         # Calculates Bnet
-        cif_path = '{}/{}/{}/{}_final.cif'.format(cif_dir, pdb_code[1:3], pdb_code, pdb_code)
+        cif_path = '{}/{}/{}/{}_final.cif'.format(
+            cif_dir, pdb_code[1:3].lower(), pdb_code.lower(), pdb_code.lower()
+        )
         bnet = calc_bnet(pdb_code, cif_path, work_dir, rabdam_dir)
         if np.isnan(bnet):
             with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
                 f.write('{}\n'.format(pdb_code))
             print('WARNING: Failed to calculate Bnet for {}'.format(pdb_code))
             continue
+        print('Bnet: {}'.format(bnet))
 
         # Summarises PDB features in dataframe
         print('Summarising info for {}'.format(pdb_code))
@@ -549,25 +579,22 @@ def write_pdb_properties():
                                     'Temperature (K)': [temperature],
                                     'Size (kDa)': [size],
                                     'Num Glu and Asp': [glu_asp_count],
+                                    'Num Glu and Asp (L and D)': [glu_asp_ld_count],
                                     '% Glu and Asp': [glu_asp_percent],
                                     'Num terminal O atoms': [num_terminal_o_atoms],
                                     'Non-canonical aas count': [non_canonical_aa_count],
-                                    'Per-atom refined B-factors': [per_atom_b_factors],
-                                    'Electron density server response': [electron_density],
                                     'Wilson plot B-factor (A^2)': [wilson_b],
-                                    'RSRZ relative to all structures': [rsrz_outliers_all],
-                                    'RSRZ relative to similar res structures': [rsrz_outliers_sim_res],
-                                    'Sub-1 occupancy (all conformers)': [all_reprocessed],
-                                    'Sub-1 occupancy (disulfide bonds)': [cys_reprocessed],
-                                    'Sub-1 occupancy (asp and glu conformers)': [asp_glu_reprocessed],
+                                    'Sub-1 occupancy (all conformers)': [sub_1_any],
+                                    'Sub-1 occupancy (disulfide bonds)': [sub_1_disulfide],
+                                    'Sub-1 occupancy (asp and glu conformers)': [sub_1_asp_glu],
+                                    'Single model': [single_model],
+                                    'Per-atom refined B-factors': [per_atom_b_factors],
                                     'B-factor restraint weight': [bfac_rest_weight],
                                     'B-factor model': [bfac_model],
                                     'Number of TLS groups': [tls_model],
                                     'Bnet': [bnet]})
         all_pdbs_df = pd.concat([all_pdbs_df, indv_pdb_df], axis=0, ignore_index=True)
-        all_pdbs_df.to_pickle('PDB_parsing_output/PDB_file_properties.pkl')
-
-    return all_pdbs_df
+        all_pdbs_df.to_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
 
 
 def calc_bnet_percentile(all_pdbs_df):
@@ -637,4 +664,6 @@ def calc_bnet_percentile(all_pdbs_df):
     bnet_percentile_df.to_pickle('{}/PDB_file_properties_percentile.pkl'.format(work_dir))
     bnet_percentile_df.to_csv('{}/PDB_file_properties_percentile.csv'.format(work_dir), index=False)
 
-    return bnet_percentile_df
+
+if __name__ == '__main__':
+    write_pdb_properties()
