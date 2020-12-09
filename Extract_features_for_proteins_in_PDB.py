@@ -597,49 +597,66 @@ def write_pdb_properties(num):
         all_pdbs_df.to_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
 
 
-def calc_bnet_percentile(all_pdbs_df):
+def calc_bnet_percentile():
     """
     Calculates bnet_percentile for PDB structure XXXX by comparing its Bnet
     value to the Bnet values of structures (min. 1000) of a similar resolution
     """
 
-    work_dir = '/home/shared/structural_bioinformatics/RABDAM/PDB_parsing_output'
-    if not os.path.isfile('{}/Bnet_percentile_unprocessed_pdbs.txt'.format(work_dir)):
-        with open('{}/Bnet_percentile_unprocessed_pdbs.txt'.format(work_dir), 'w') as f:
-            f.write('Structures with a null / infinite Bnet value (which is '
-                    'hence unsuitable for percentile calculations)\n')
+    work_dir = '/Users/ks17361/Lab_work_Elspeth_Garman/Papers/Bnet/PDB_analysis'
+    # Filter to retain only those structures:
+    # - Higher than 3.5 A resolution
+    # - Temperature in the range of 80 - 120 K
+    # - 20 or more Asp/Glu (L and D conformers) side-chain carnoxyl group oxygen atoms
+    # - No disulfide bonds with multiple conformers
+    # - No Asp/Glu residues with sub-1 occupancy (across all conformers)
+    # - Single model
+    # - Per-atom refined B-factors
+    # - Non-flat B-factor model
+    all_pdbs_df = pd.read_pickle('{}/PDB_file_properties_all_structures.pkl'.format(work_dir))
+    filt_pdbs_df = all_pdbs_df[
+          (all_pdbs_df['Resolution (A)'] <= 3.5)
+        & (all_pdbs_df['Temperature (K)'] >= 80)
+        & (all_pdbs_df['Temperature (K)'] <= 120)
+        & (all_pdbs_df['Num terminal O atoms'] >= 20)
+        & (all_pdbs_df['Sub-1 occupancy (disulfide bonds)'] == 0)
+        & (all_pdbs_df['Sub-1 occupancy (asp and glu conformers)'] == 0)
+        & (all_pdbs_df['Single model'] == 1)
+        & (all_pdbs_df['Per-atom refined B-factors'] == 1)
+        & (all_pdbs_df['B-factor model'].isin(['isotropic', 'anisotropic']))
+    ]
+    filt_pdbs_df = filt_pdbs_df.reset_index(drop=True)
 
-    resolution_percentile = [np.nan]*all_pdbs_df.shape[0]
-    restraint_percentile = [np.nan]*all_pdbs_df.shape[0]
+    resolution_percentile = [np.nan]*filt_pdbs_df.shape[0]
+    restraint_percentile = [np.nan]*filt_pdbs_df.shape[0]
 
-    for row in range(all_pdbs_df.shape[0]):
-        pdb_code = all_pdbs_df['PDB code'][row]
-        resolution = all_pdbs_df['Resolution (A)'][row]
-        restraint = all_pdbs_df['B-factor restraint weight'][row]
-        bnet = all_pdbs_df['Bnet'][row]
+    for row in range(filt_pdbs_df.shape[0]):
+        pdb_code = filt_pdbs_df['PDB code'][row]
+        resolution = filt_pdbs_df['Resolution (A)'][row]
+        restraint = filt_pdbs_df['B-factor restraint weight'][row]
+        bnet = filt_pdbs_df['Bnet'][row]
         if np.isnan(bnet) or np.isinf(bnet):
-            print('WARNING: Not calculating Bnet percentile for {}'.format(pdb_code))
-            with open('{}/Bnet_percentile_unprocessed_pdbs.txt'.format(work_dir), 'a') as f:
-                f.write('{}\n'.format(pdb_code))
-            continue
+            raise ValueError(
+                'WARNING: Not calculating Bnet percentile for {}'.format(pdb_code)
+            )
 
         print('Calculating Bnet percentile for {} {}'.format(
-            pdb_code, ((row+1) / all_pdbs_df.shape[0])
+            pdb_code, ((row+1) / filt_pdbs_df.shape[0])
         ))
 
         for percentile_tup in [
              [resolution, 'Resolution (A)', resolution_percentile],
              [restraint, 'B-factor restraint weight', restraint_percentile]
         ]:
-            prop_num = percentile_tup[0]
+            prop_val = percentile_tup[0]
             prop_name = percentile_tup[1]
             percentile = percentile_tup[2]
 
-            array = copy.deepcopy(all_pdbs_df[prop_name]).to_numpy()
+            array = copy.deepcopy(filt_pdbs_df[prop_name]).to_numpy()
             surr_struct_indices = []
             surr_struct_vals = []
             for num in range(1000):
-                index = (np.abs(array-prop_num)).argmin()
+                index = (np.abs(array-prop_val)).argmin()
                 nearest_prop_val = array[index]
                 surr_struct_indices.append(index)
                 surr_struct_vals.append(nearest_prop_val)
@@ -651,19 +668,36 @@ def calc_bnet_percentile(all_pdbs_df):
                 if num == min_val or num == max_val:
                     surr_struct_indices.append(index[0])
 
-            surr_struct_df = copy.deepcopy(all_pdbs_df).iloc[surr_struct_indices].reset_index(drop=True)
+            surr_struct_df = copy.deepcopy(filt_pdbs_df).iloc[surr_struct_indices].reset_index(drop=True)
             bnet_range = np.sort(surr_struct_df['Bnet'].to_numpy())
-            bnet_percentile = (np.where(bnet_range == bnet)[0][0] + 1) / bnet_range.shape[0]
+            bnet_percentile_list = np.where(bnet_range == bnet)
+            if len(bnet_percentile_list) == 1:
+                i = 0
+                bnet_percentile = (bnet_percentile_list[i][0] + 1) / bnet_range.shape[0]
+            elif len(bnet_percentile_list) > 1:
+                if len(bnet_percentile_list) % 2 == 1:
+                    i = (len(bnet_percentile_list) - 1) / 2
+                    bnet_percentile = (bnet_percentile_list[i][0] + 1) / bnet_range.shape[0]
+                elif len(bnet_percentile_list) % 2 == 0:
+                    i = (len(bnet_percentile_list) - 2) / 2
+                    j = len(bnet_percentile_list) / 2
+                    average = (bnet_percentile_list[i][0] + bnet_percentile_list[j][0]) / 2
+                    bnet_percentile = (average + 1) / bnet_range.shape[0]
+            else:
+                raise Exception(
+                    'ERROR occured during calculation of Bnet percentile for '
+                    '{}'.format(pdb_code)
+                )
             percentile[row] = bnet_percentile
 
     bnet_percentile_df = pd.DataFrame({'Bnet percentile (resolution)': resolution_percentile,
                                        'Bnet percentile (restraint weight)': restraint_percentile})
     bnet_percentile_df = pd.concat(
-        [all_pdbs_df, bnet_percentile_df], axis=1
+        [filt_pdbs_df, bnet_percentile_df], axis=1
     ).reset_index(drop=True)
-    bnet_percentile_df.to_pickle('{}/PDB_file_properties_percentile.pkl'.format(work_dir))
-    bnet_percentile_df.to_csv('{}/PDB_file_properties_percentile.csv'.format(work_dir), index=False)
-
-
-if __name__ == '__main__':
-    write_pdb_properties()
+    bnet_percentile_df.to_pickle(
+        '{}/PDB_file_properties_filtered_Bnet_percentile.pkl'.format(work_dir)
+    )
+    bnet_percentile_df.to_csv(
+        '{}/PDB_file_properties_filtered_Bnet_percentile.csv'.format(work_dir), index=False
+    )
