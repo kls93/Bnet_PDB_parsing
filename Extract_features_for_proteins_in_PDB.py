@@ -595,6 +595,7 @@ def write_pdb_properties(num):
                                     'Bnet': [bnet]})
         all_pdbs_df = pd.concat([all_pdbs_df, indv_pdb_df], axis=0, ignore_index=True)
         all_pdbs_df.to_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
+        all_pdbs_df.to_excel('{}/PDB_file_properties.xlsx'.format(work_dir), index=False)
 
 
 def calc_bnet_percentile():
@@ -698,6 +699,6 @@ def calc_bnet_percentile():
     bnet_percentile_df.to_pickle(
         '{}/PDB_file_properties_filtered_Bnet_percentile.pkl'.format(work_dir)
     )
-    bnet_percentile_df.to_csv(
-        '{}/PDB_file_properties_filtered_Bnet_percentile.csv'.format(work_dir), index=False
+    bnet_percentile_df.to_excel(
+        '{}/PDB_file_properties_filtered_Bnet_percentile.xlsx'.format(work_dir), index=False
     )
