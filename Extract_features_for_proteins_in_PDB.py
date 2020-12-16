@@ -608,8 +608,7 @@ def calc_bnet_percentile():
     # Filter to retain only those structures:
     # - Higher than 3.5 A resolution
     # - Temperature in the range of 80 - 120 K
-    # - 20 or more Asp/Glu (L and D conformers) side-chain carnoxyl group oxygen atoms
-    # - No disulfide bonds with multiple conformers
+    # - 20 or more Asp/Glu (L and D conformers) side-chain carboxyl group oxygen atoms
     # - No Asp/Glu residues with sub-1 occupancy (across all conformers)
     # - Single model
     # - Per-atom refined B-factors
@@ -620,7 +619,6 @@ def calc_bnet_percentile():
         & (all_pdbs_df['Temperature (K)'] >= 80)
         & (all_pdbs_df['Temperature (K)'] <= 120)
         & (all_pdbs_df['Num terminal O atoms'] >= 20)
-        & (all_pdbs_df['Sub-1 occupancy (disulfide bonds)'] == 0)
         & (all_pdbs_df['Sub-1 occupancy (asp and glu conformers)'] == 0)
         & (all_pdbs_df['Single model'] == 1)
         & (all_pdbs_df['Per-atom refined B-factors'] == 1)
@@ -702,3 +700,6 @@ def calc_bnet_percentile():
     bnet_percentile_df.to_excel(
         '{}/PDB_file_properties_filtered_Bnet_percentile.xlsx'.format(work_dir), index=False
     )
+
+if __name__ == '__main__':
+    calc_bnet_percentile()
