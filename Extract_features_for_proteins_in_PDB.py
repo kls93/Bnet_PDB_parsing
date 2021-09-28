@@ -25,6 +25,8 @@ def check_rsrz_outliers(pdb_code):
     *** Currently not in use to calculate RSRZ outlier values because RABDAM is
     being run on the PDB-REDO database, and these values as far as I can tell
     can only be obtained for the original PDB structures ***
+    *** Also not in use to determine Wilson B-factor values to prevent request
+    from failing when send too many to the RCSB PDB when run code in parallel ***
     """
 
     rsrz_outliers_all = np.nan
@@ -88,6 +90,26 @@ def calc_bnet(pdb_code, cif_path, output_dir, rabdam_dir):
         raise FileNotFoundError('{}/Logfiles/Bnet_protein.pkl doesn\'t exist'.format(output_dir))
 
     return bnet
+
+
+def find_deposition_year(cif_lines):
+    """
+    Finds year of deposition in mmCIF file header
+    """
+
+    year = np.nan
+
+    for subsection in cif_lines:
+        if '_pdbx_database_status.recvd_initial_deposition_date' in subsection:
+            sub_lines = subsection.split('\n')
+            for line in sub_lines:
+                if line.startswith('_pdbx_database_status.recvd_initial_deposition_date'):
+                    try:
+                        date = line.replace('_pdbx_database_status.recvd_initial_deposition_date', '')
+                        year = int(date.split('-')[0])
+                    except ValueError:
+                        pass
+    return year
 
 
 def find_structurewide_properties(cif_lines):
@@ -206,12 +228,13 @@ def find_structurewide_properties(cif_lines):
 def find_b_factor_restraints(pdb_code, json_lines):
     """
     Finds the strength of the B-factor restraints applied in the final round of
-    refinement of PDB-REDO structures
+    refinement of PDB-REDO structures. Also finds the Wilson B-factor.
     """
 
     bfac_rest_weight = np.nan
     bfac_model = np.nan
     tls_model = np.nan
+    wilson_b = np.nan
 
     model_conv_dict = {'ISOT': 'isotropic',
                        'ANISOT': 'anisotropic',
@@ -244,8 +267,13 @@ def find_b_factor_restraints(pdb_code, json_lines):
                     pass
             except ValueError:
                 pass
+        elif '\"BWILS\":' in line:
+            try:
+                wilson_b = float(line.split(':')[1].replace(',', ''))
+            except ValueError:
+                pass
 
-    return (bfac_rest_weight, bfac_model, tls_model)
+    return (bfac_rest_weight, bfac_model, tls_model, wilson_b)
 
 
 def find_aa_properties(seqres, mass_dict):
@@ -430,6 +458,7 @@ def write_pdb_properties(num):
     print(num)
 
     cif_dir = '/home/shared/structural_bioinformatics/pdb_redo'
+    pdb_dir = '/home/shared/structural_bioinformatics/rcsb_pdb/mmCIF'
     work_dir = '/home/shared/structural_bioinformatics/RABDAM/PDB_parsing_output/{}/'.format(num)
     rabdam_dir = '/home/shared/structural_bioinformatics/RABDAM'
 
@@ -451,6 +480,7 @@ def write_pdb_properties(num):
         all_pdbs_df = pd.read_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
     else:
         all_pdbs_df = pd.DataFrame({'PDB code': [],
+                                    'Deposition year': [],
                                     'Resolution (A)': [],
                                     'Rwork': [],
                                     'Rfree': [],
@@ -508,6 +538,20 @@ def write_pdb_properties(num):
                 f.write('{}\n'.format(pdb_code))
             continue
 
+        # Opens mmCIF PDB file
+        pdb_lines = None
+        try:
+            with open(
+                '{}/{}/{}.cif'.format(
+                pdb_dir, pdb_code[1:3].lower(), pdb_code.lower()
+                ), 'r'
+            ) as f:
+                pdb_lines = f.read().split('#')
+        except FileNotFoundError:
+            with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'a') as f:
+                f.write('{}\n'.format(pdb_code))
+            continue
+
         # Generates dictionary of properties for each atom
         atom_lines = []
         for subsection in cif_lines:
@@ -529,23 +573,23 @@ def write_pdb_properties(num):
                             atom_lines.append(atom_props)
 
         # Finds structural properties of interest
+        year = find_deposition_year(pdb_lines)
         (resolution, rwork, rfree, temperature, seqres, ss_bonds
         ) = find_structurewide_properties(cif_lines)
-        wilson_b = check_rsrz_outliers(pdb_code)
         (size, glu_asp_count, glu_asp_ld_count, glu_asp_percent,
          non_canonical_aa_count
         ) = find_aa_properties(seqres, mass_dict)
         (num_terminal_o_atoms, sub_1_any, sub_1_asp_glu, sub_1_disulfide,
          single_model) = find_peratom_properties(atom_lines, seqres, ss_bonds)
         per_atom_b_factors = find_non_per_atom_b_factors(atom_lines, seqres)
-        bfac_rest_weight, bfac_model, tls_model = find_b_factor_restraints(
-            pdb_code, json_lines
-        )
+        (bfac_rest_weight, bfac_model, tls_model, wilson_b
+        ) = find_b_factor_restraints(pdb_code, json_lines)
 
         # Filters out PDBs with unsuitable properties for Bnet calculation
         if (
                np.isnan(resolution)
             or np.isnan(temperature)
+            or np.isnan(rfree)
             or size == 0
             or num_terminal_o_atoms == 0
             or single_model is False
@@ -573,6 +617,7 @@ def write_pdb_properties(num):
         # Summarises PDB features in dataframe
         print('Summarising info for {}'.format(pdb_code))
         indv_pdb_df = pd.DataFrame({'PDB code': [pdb_code],
+                                    'Deposition year': [year],
                                     'Resolution (A)': [resolution],
                                     'Rwork': [rwork],
                                     'Rfree': [rfree],
@@ -604,7 +649,7 @@ def calc_bnet_percentile():
     value to the Bnet values of structures (min. 1000) of a similar resolution
     """
 
-    work_dir = '/Users/ks17361/Lab_work_Elspeth_Garman/Papers/Bnet/PDB_analysis'
+    work_dir = '/Users/ks17361/Lab_work_Elspeth_Garman/Papers/Bnet/PDB-REDO_analysis'
     # Filter to retain only those structures:
     # - Higher than 3.5 A resolution
     # - Temperature in the range of 80 - 120 K
@@ -618,6 +663,7 @@ def calc_bnet_percentile():
           (all_pdbs_df['Resolution (A)'] <= 3.5)
         & (all_pdbs_df['Temperature (K)'] >= 80)
         & (all_pdbs_df['Temperature (K)'] <= 120)
+        & (all_pdbs_df['Rfree'] <= 0.4)
         & (all_pdbs_df['Num terminal O atoms'] >= 20)
         & (all_pdbs_df['Sub-1 occupancy (asp and glu conformers)'] == 0)
         & (all_pdbs_df['Single model'] == 1)
@@ -627,12 +673,11 @@ def calc_bnet_percentile():
     filt_pdbs_df = filt_pdbs_df.reset_index(drop=True)
 
     resolution_percentile = [np.nan]*filt_pdbs_df.shape[0]
-    restraint_percentile = [np.nan]*filt_pdbs_df.shape[0]
+    resolution_range = [np.nan]*filt_pdbs_df.shape[0]
 
     for row in range(filt_pdbs_df.shape[0]):
         pdb_code = filt_pdbs_df['PDB code'][row]
         resolution = filt_pdbs_df['Resolution (A)'][row]
-        restraint = filt_pdbs_df['B-factor restraint weight'][row]
         bnet = filt_pdbs_df['Bnet'][row]
         if np.isnan(bnet) or np.isinf(bnet):
             raise ValueError(
@@ -644,12 +689,12 @@ def calc_bnet_percentile():
         ))
 
         for percentile_tup in [
-             [resolution, 'Resolution (A)', resolution_percentile],
-             [restraint, 'B-factor restraint weight', restraint_percentile]
+             [resolution, 'Resolution (A)', resolution_percentile, resolution_range]
         ]:
             prop_val = percentile_tup[0]
             prop_name = percentile_tup[1]
             percentile = percentile_tup[2]
+            percentile_range = percentile_tup[3]
 
             array = copy.deepcopy(filt_pdbs_df[prop_name]).to_numpy()
             surr_struct_indices = []
@@ -663,6 +708,7 @@ def calc_bnet_percentile():
 
             min_val = min(surr_struct_vals)
             max_val = max(surr_struct_vals)
+            res_range = [min_val, max_val]
             for index, num in np.ndenumerate(array):
                 if num == min_val or num == max_val:
                     surr_struct_indices.append(index[0])
@@ -688,9 +734,10 @@ def calc_bnet_percentile():
                     '{}'.format(pdb_code)
                 )
             percentile[row] = bnet_percentile
+            percentile_range[row] = res_range
 
     bnet_percentile_df = pd.DataFrame({'Bnet percentile (resolution)': resolution_percentile,
-                                       'Bnet percentile (restraint weight)': restraint_percentile})
+                                       'Bnet percentile resolution bin (min - max) (A)': resolution_range})
     bnet_percentile_df = pd.concat(
         [filt_pdbs_df, bnet_percentile_df], axis=1
     ).reset_index(drop=True)
