@@ -476,8 +476,8 @@ def write_pdb_properties(num):
     if not os.path.isfile('{}/Unprocessed_PDBs.txt'.format(work_dir)):
         with open('{}/Unprocessed_PDBs.txt'.format(work_dir), 'w') as f:
             f.write('PDBs unable to be processed:\n')
-    if os.path.isfile('{}/PDB_file_properties.pkl'.format(work_dir)):
-        all_pdbs_df = pd.read_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
+    if os.path.isfile('{}/PDB-REDO_file_properties_all_structures.pkl'.format(work_dir)):
+        all_pdbs_df = pd.read_pickle('{}/PDB-REDO_file_properties_all_structures.pkl'.format(work_dir))
     else:
         all_pdbs_df = pd.DataFrame({'PDB code': [],
                                     'Deposition year': [],
@@ -639,8 +639,8 @@ def write_pdb_properties(num):
                                     'Number of TLS groups': [tls_model],
                                     'Bnet': [bnet]})
         all_pdbs_df = pd.concat([all_pdbs_df, indv_pdb_df], axis=0, ignore_index=True)
-        all_pdbs_df.to_pickle('{}/PDB_file_properties.pkl'.format(work_dir))
-        all_pdbs_df.to_excel('{}/PDB_file_properties.xlsx'.format(work_dir), index=False)
+        all_pdbs_df.to_pickle('{}/PDB-REDO_file_properties_all_structures.pkl'.format(work_dir))
+        all_pdbs_df.to_excel('{}/PDB-REDO_file_properties_all_structures.xlsx'.format(work_dir), index=False)
 
 
 def calc_bnet_percentile():
@@ -658,7 +658,7 @@ def calc_bnet_percentile():
     # - Single model
     # - Per-atom refined B-factors
     # - Non-flat B-factor model
-    all_pdbs_df = pd.read_pickle('{}/PDB_file_properties_all_structures.pkl'.format(work_dir))
+    all_pdbs_df = pd.read_pickle('{}/PDB-REDO_file_properties_all_structures.pkl'.format(work_dir))
     filt_pdbs_df = all_pdbs_df[
           (all_pdbs_df['Resolution (A)'] <= 3.5)
         & (all_pdbs_df['Temperature (K)'] >= 80)
@@ -715,18 +715,17 @@ def calc_bnet_percentile():
 
             surr_struct_df = copy.deepcopy(filt_pdbs_df).iloc[surr_struct_indices].reset_index(drop=True)
             bnet_range = np.sort(surr_struct_df['Bnet'].to_numpy())
-            bnet_percentile_list = np.where(bnet_range == bnet)
+            bnet_percentile_list = np.where(bnet_range == bnet)[0]
             if len(bnet_percentile_list) == 1:
-                i = 0
-                bnet_percentile = (bnet_percentile_list[i][0] + 1) / bnet_range.shape[0]
+                bnet_percentile = (bnet_percentile_list[0] + 1) / bnet_range.shape[0]
             elif len(bnet_percentile_list) > 1:
                 if len(bnet_percentile_list) % 2 == 1:
                     i = (len(bnet_percentile_list) - 1) / 2
-                    bnet_percentile = (bnet_percentile_list[i][0] + 1) / bnet_range.shape[0]
+                    bnet_percentile = (bnet_percentile_list[i] + 1) / bnet_range.shape[0]
                 elif len(bnet_percentile_list) % 2 == 0:
                     i = (len(bnet_percentile_list) - 2) / 2
                     j = len(bnet_percentile_list) / 2
-                    average = (bnet_percentile_list[i][0] + bnet_percentile_list[j][0]) / 2
+                    average = (bnet_percentile_list[i] + bnet_percentile_list[j]) / 2
                     bnet_percentile = (average + 1) / bnet_range.shape[0]
             else:
                 raise Exception(
@@ -742,10 +741,10 @@ def calc_bnet_percentile():
         [filt_pdbs_df, bnet_percentile_df], axis=1
     ).reset_index(drop=True)
     bnet_percentile_df.to_pickle(
-        '{}/PDB_file_properties_filtered_Bnet_percentile.pkl'.format(work_dir)
+        '{}/PDB-REDO_file_properties_filtered_Bnet_percentile.pkl'.format(work_dir)
     )
     bnet_percentile_df.to_excel(
-        '{}/PDB_file_properties_filtered_Bnet_percentile.xlsx'.format(work_dir), index=False
+        '{}/PDB-REDO_file_properties_filtered_Bnet_percentile.xlsx'.format(work_dir), index=False
     )
 
 if __name__ == '__main__':
