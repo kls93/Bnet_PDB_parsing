@@ -720,11 +720,11 @@ def calc_bnet_percentile():
                 bnet_percentile = (bnet_percentile_list[0] + 1) / bnet_range.shape[0]
             elif len(bnet_percentile_list) > 1:
                 if len(bnet_percentile_list) % 2 == 1:
-                    i = (len(bnet_percentile_list) - 1) / 2
+                    i = int((len(bnet_percentile_list) - 1) / 2)
                     bnet_percentile = (bnet_percentile_list[i] + 1) / bnet_range.shape[0]
                 elif len(bnet_percentile_list) % 2 == 0:
-                    i = (len(bnet_percentile_list) - 2) / 2
-                    j = len(bnet_percentile_list) / 2
+                    i = int((len(bnet_percentile_list) - 2) / 2)
+                    j = int(len(bnet_percentile_list) / 2)
                     average = (bnet_percentile_list[i] + bnet_percentile_list[j]) / 2
                     bnet_percentile = (average + 1) / bnet_range.shape[0]
             else:
